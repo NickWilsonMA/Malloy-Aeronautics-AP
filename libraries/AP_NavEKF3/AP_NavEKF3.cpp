@@ -1345,7 +1345,11 @@ bool NavEKF3::getOriginLLH(int8_t instance, struct Location &loc) const
     if (!core) {
         return false;
     }
-    return core[instance].getOriginLLH(loc);
+    if (common_origin_valid) {
+        loc = common_EKF_origin;
+        return true;
+    }
+    return core[primary].getOriginLLH(loc);
 }
 
 // set the latitude and longitude and height used to set the NED origin
