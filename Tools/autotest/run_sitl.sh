@@ -1,0 +1,1 @@
+./sim_vehicle.py -v ArduCopter -f octa-quad --console --map
