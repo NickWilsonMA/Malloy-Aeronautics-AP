@@ -176,6 +176,8 @@ const AP_GPS_UBLOX::config_list AP_GPS_UBLOX::config_MB_Base_uart2[] {
   data from a GPS previously configured as a base
  */
 const AP_GPS_UBLOX::config_list AP_GPS_UBLOX::config_MB_Rover_uart1[] {
+ { ConfigKey::CFG_UART2_ENABLED, 1},
+ { ConfigKey::CFG_UART2_BAUDRATE, 460800},
  { ConfigKey::CFG_UART2OUTPROT_RTCM3X, 0},
  { ConfigKey::CFG_UART1INPROT_RTCM3X, 0},
  { ConfigKey::CFG_UART2INPROT_RTCM3X, 1},
@@ -195,8 +197,6 @@ const AP_GPS_UBLOX::config_list AP_GPS_UBLOX::config_MB_Rover_uart1[] {
  { ConfigKey::MSGOUT_RTCM_3X_TYPE1097_UART2, 0},
  { ConfigKey::MSGOUT_RTCM_3X_TYPE1127_UART2, 0},
  { ConfigKey::MSGOUT_RTCM_3X_TYPE1230_UART2, 0},
- { ConfigKey::CFG_UART2_ENABLED, 1},
- { ConfigKey::CFG_UART2_BAUDRATE, 460800},
 };
 
 const AP_GPS_UBLOX::config_list AP_GPS_UBLOX::config_MB_Rover_uart2[] {
@@ -388,7 +388,9 @@ AP_GPS_UBLOX::_request_next_config(void)
             }
             if (role == AP_GPS::GPS_ROLE_MB_ROVER) {
                 const config_list *list = mb_use_uart2()?config_MB_Rover_uart2:config_MB_Rover_uart1;
+
                 uint8_t list_length = mb_use_uart2()?ARRAY_SIZE(config_MB_Rover_uart2):ARRAY_SIZE(config_MB_Rover_uart1);
+                GCS_SEND_TEXT(MAV_SEVERITY_INFO, "list length %d", list_length);
                 if (!_configure_config_set(list, list_length, CONFIG_RTK_MOVBASE)) {
                     _next_message--;
                 }
@@ -1782,6 +1784,7 @@ AP_GPS_UBLOX::_configure_config_set(const config_list *list, uint8_t count, uint
     uint8_t buf[sizeof(ubx_cfg_valget)+count*sizeof(ConfigKey)];
     struct ubx_cfg_valget msg {};
     if (port->txspace() < (uint16_t)(sizeof(struct ubx_header)+sizeof(buf)+2)) {
+        GCS_SEND_TEXT(MAV_SEVERITY_INFO, "Mg false");
         return false;
     }
     msg.version = 0;
