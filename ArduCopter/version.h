@@ -6,7 +6,7 @@
 
 #include "ap_version.h"
 
-#define THISFIRMWARE "MA V4.1.1.3"
+#define THISFIRMWARE "MA V4.1.1.4"
 
 // the following line is parsed by the autotest scripts
 #define FIRMWARE_VERSION 4,1,1,FIRMWARE_VERSION_TYPE_OFFICIAL
