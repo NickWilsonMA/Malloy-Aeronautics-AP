@@ -174,3 +174,48 @@ enum LoggingParameters {
 #define THR_BEHAVE_FEEDBACK_FROM_MID_STICK (1<<0)
 #define THR_BEHAVE_HIGH_THROTTLE_CANCELS_LAND (1<<1)
 #define THR_BEHAVE_DISARM_ON_LAND_DETECT (1<<2)
+// Integrity Monitor
+#define IM_HCINS_DATA_TIMEOUT_MS (250)
+#define IM_PX_DATA_TIMEOUT_MS (550)
+#define IM_DELAYED_SWITCH_TIME_MS (30 * 1000)
+#define IM_HCINS_GPS_DATA_LEN (3)
+#define IM_PX_NAV_DATA_LEN (10)
+#define IM_PX_NAV_DATA_OFFSET (-5)
+#define IM_SWITCH_UNAIDED_AIDIED_TIMEOUT_MS (15 * 1000)
+#define IM_PX_HACC_ABOVE_THR_TIMEOUT_MS (5 * 1000)
+#define IM_PX_HACC_BELLOW_THR_TIMEOUT_MS (15 * 1000)
+
+// IM Level 1 thresholds
+#define IM_L1_POS_N_DIFF_THR (2.0f) // Position N difference threshold [m]
+#define IM_L1_POS_E_DIFF_THR (2.0f) // Position E difference threshold [m]
+#define IM_L1_VEL_N_DIFF_THR (1.0f) // Velocity N difference threshold [m/s]
+#define IM_L1_VEL_E_DIFF_THR (1.0f) // Velocity E difference threshold [m/s]
+#define IM_L1_VEL_D_DIFF_THR (1.0f) // Velocity D difference threshold [m/s]
+
+//IM Level 2 thresholds
+#define IM_L2_HPOS_ACC_DIFF_THR (5.0f) // Horizontal Position Accuracy difference threshold [m]
+#define IM_L2_PX_HPOS_ACC_RESTORE_THR (30.0f) // Horizontal position accuracy restore threshold
+#define IM_L2_COND1_DELAY_TIME_MS (20 * 1000) // Cond 1 delay time [ms]
+#define IM_L2_HPOS_DIFF_THR (20.0f) // Horizontal Position difference threshold [m]
+#define IM_L2_ALT_DIFF_THR (30.0f) // Altitude difference threshold [m]
+#define IM_L2_VEL_N_DIFF_THR (2.0f) // Velocity N difference threshold [m/s]
+#define IM_L2_VEL_E_DIFF_THR (2.0f) // Velocity E difference threshold [m/s]
+#define IM_L2_VEL_D_DIFF_THR (3.0f) // Velocity D difference threshold [m/s]
+#define IM_L2_TRK_DIFF_THR (45.0f) // Track Angle difference threshold [deg]
+#define IM_L2_HDG_DIFF_THR (45.0f) // Heading difference threshold [deg]
+#define IM_L2_GROUND_SPEED_AVG_THR (1.0f) // Ground Speed Average threshold [m/s]
+#define IM_L2_PX_HPOS_ACC_THR (2.0f) // Horizontal Position Accuracy threshold [m] 
+#define IM_L2_PX_VPOS_ACC_THR (3.0f) // Vertical Position Accuracy threshold [m]
+#define IM_L2_PX_SPEED_ACC_THR (0.5f) // Speed Accuracy threshold [m/s]
+#define IM_L2_POS_CHI_THR (5.0f) // Position Chi threshold [-]
+
+//HCINS Navigation States
+#define IM_HCINS_NAV_STATE_ALLIGNMENT (0) 
+#define IM_HCINS_NAV_STATE_STANDBY (1) 
+#define IM_HCINS_NAV_STATE_UNAIDED (2) 
+#define IM_HCINS_NAV_STATE_GPS_AIDED (3)
+#define IM_HCINS_NAV_STATE_EAP_AIDED (4)
+#define IM_HCINS_NAV_STATE_GPS_EAP_AIDED (5)
+
+// thresholds
+

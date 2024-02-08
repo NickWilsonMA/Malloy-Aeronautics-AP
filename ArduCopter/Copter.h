@@ -34,6 +34,7 @@
 #include <StorageManager/StorageManager.h>  // library for Management for hal.storage to allow for backwards compatible mapping of storage offsets to available storage
 
 // Application dependencies
+#include <GCS_MAVLink/GCS.h>                // Library for Interface definition for the various Ground Control System
 #include <AP_Logger/AP_Logger.h>            // ArduPilot Mega Flash Memory Library
 #include <AP_Math/AP_Math.h>                // ArduPilot Mega Vector/Matrix math Library
 #include <AP_AccelCal/AP_AccelCal.h>        // interface and maths for accelerometer calibration
@@ -638,7 +639,136 @@ private:
                   "FAILSAFE_LAND_PRIORITY must match the entry in _failsafe_priorities");
     static_assert(_failsafe_priorities[ARRAY_SIZE(_failsafe_priorities) - 1] == -1,
                   "_failsafe_priorities is missing the sentinel");
+    struct IM_hcins_gps_data_t {
+            uint32_t gps_time;
+            uint32_t last_message_time_ms;
+            float h_acc;
+            float v_acc;
+            float s_acc;
+            Location location;
+            Vector3f velocity;
+            float ground_speed;
+            float ground_course;
+            float vehicle_heading;
+            float pos_chi;
+            float gps_heading_acc;
+            uint8_t nav_state;
+            uint8_t eap_status;
+            uint8_t gnss_state;
+            uint8_t external_heading_enable;
+            AP_GPS::GPS_Status gps_status;
+            float heading_time;
+            uint8_t heading_initialized;
+            uint8_t logging;
+            uint32_t serial_number;
+            float vibe[3];
+            uint8_t sw_version[4];
+            uint16_t gdop;
+            uint16_t pdop;
+            uint8_t jamming;
+            uint16_t noise_per_ms;
+            uint8_t number_svs;
+            uint8_t number_svs_in_use;
+            uint8_t sv_hi_cn0_in_use;
+            uint8_t svs_avg_cn0_in_use;
+            float gps_hacc;
+            uint8_t dome_jamming;
+            uint8_t gnss_heading_bias_est_valid;
+            float gnss_heading_bias_est;
+            int32_t gnss_lat;
+            int32_t gnss_lon;
+            float gnss_alt_msl;
+            float eap_snr;
+            float eap_range;
+        };
 
+        struct IM_px_nav_data_t {
+            uint32_t time_ms;
+            uint32_t last_message_time_ms;
+            Location location;
+            Vector3f velocity;
+        };
+        
+        struct IM_state_t {
+            int32_t primary; //  0 = PX GPS
+                            //  1 = HCINS GPS
+                            // -1 = no available GPS
+            int32_t new_primary;
+            uint32_t switch_nav_source_delay;
+            uint32_t switch_heading_delay;
+            uint32_t l2_cond1_delay;
+            bool  l2_cond1_px_hacc_above_thr;
+            bool  l2_cond1_active;
+            int hcins_gps_data_idx;
+            IM_hcins_gps_data_t hcins_gps_data[IM_HCINS_GPS_DATA_LEN];
+            int px_nav_data_idx;
+            IM_px_nav_data_t px_nav_data[IM_PX_NAV_DATA_LEN];
+            bool init_with_px;
+            bool init_with_hcins;
+            uint32_t status; // Summary status of IM intended for ground station
+                            // bit 0: PX GPS valid
+                            // bit 1: HCINS valid
+                            // bit 2: Level 2 condition 1
+                            // bit 3: Level 2 condition 2
+                            // bit 4: Level 2 condition 3
+                            // bit 5: Level 2 condition 4
+                            // bit 6: Level 2 condition 5
+                            // bit 7: Level 2 condition 6
+                            // bit 8: Level 2 condition 7
+                            // bit 9: Level 2 condition 8
+                            // bit 10: Level 1 condition 1
+                            // bit 11: Level 1 condition 2
+                            // bit 12: Level 1 condition 3
+                            // bit 13: Level 1 condition 4
+                            // bit 14: Level 1 condition 5
+                            // bit 15: Switch enable indicator
+                            // bit 16: Switch Level 1 indicator
+                            // bit 17: Switch Level 2 indicator
+                            // bits 20-25: number of seconds HCINS has been delayed
+            uint8_t hcins_nav_state;
+            uint8_t hcins_prev_state;
+            uint8_t external_heading_enable;
+            bool L1_switch;
+            bool L2_switch;
+            uint32_t L2_switch_last_run_ms;
+            Location hcins_gps_origin;
+            bool hcins_gps_origin_set;
+            bool enable_switch;
+            uint32_t switch_px_hacc_above_thr_delay;
+            uint32_t switch_disable_px_hacc_delay;
+            uint32_t switch_disable_unaided_aided_delay;
+            bool hcins_gps_data_avail;
+        };
+
+        IM_state_t IM_state = {
+            -1,
+            -1,
+            0,
+            0,
+            0,
+            false,
+            false,
+            0,
+            { { 0, 0 }, { 0, 0 }, { 0, 0 } },
+            0,
+            { { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 } },
+            false,
+            false,
+            0,
+            3,
+            0,
+            0,
+            false,
+            false,
+            0,
+            { },
+            false,
+            false,
+            0,
+            0,
+            0,
+            false
+        };
 
 
     // AP_State.cpp
@@ -679,6 +809,7 @@ private:
     void twentyfive_hz_logging();
     void three_hz_loop();
     void one_hz_loop();
+    void mavlink_to_hcins_loop();
     void init_simple_bearing();
     void update_simple_mode(void);
     void update_super_simple_bearing(bool force_update);
@@ -688,6 +819,22 @@ private:
     bool get_wp_bearing_deg(float &bearing) const override;
     bool get_wp_crosstrack_error_m(float &xtrack_error) const override;
     bool get_rate_bf_targets(Vector3f& rate_bf_targets) const override;
+    void IM_store_hcins_gps_data(void);
+    void IM_store_px_nav_data(void);
+    void IM_L1_check(bool& data_status);
+    void IM_set_hcins_gps_origin(void);
+    void IM_earthradius(double latitude, double altitude,
+                        double& ns_radius, double& ew_radius);
+    void IM_pos_NED(double lon, double lat, double alt,
+                    double origLon, double origLat, double origAlt,
+                    Vector3d& ned);
+    IM_px_nav_data_t IM_get_px_nav_data(int32_t idx_offset);
+    IM_hcins_gps_data_t IM_get_hcins_gps(int32_t idx_offset);
+    void IM_update_GPS(void);
+    void IM_update(void);
+    void IM_switch_primary_aiding(int32_t new_primary);
+    void IM_load_parameters(void);
+    void IM_set_parameters(int type);
 
     // Attitude.cpp
     void update_throttle_hover();

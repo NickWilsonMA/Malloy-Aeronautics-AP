@@ -663,7 +663,15 @@ public:
 #if MODE_GUIDED_ENABLED == ENABLED
     AP_Float guided_timeout;
 #endif
-
+    AP_Float                pilot_y_rate;
+    AP_Float                pilot_y_expo;
+    AP_Int8                 surftrak_mode;
+	
+	AP_Int8 hcins_heading_compass_switch_enable;
+    AP_Int16 hcins_heading_compass_switch_delay_to_aided;
+    AP_Int16 hcins_heading_compass_switch_delay_from_aided;
+    AP_Int16 hcins_mavlink_enable;
+	AP_Int16 hcins_im_enable;
     AP_Int8                 surftrak_mode;
     AP_Int8                 failsafe_dr_enable;
     AP_Int16                failsafe_dr_timeout;
