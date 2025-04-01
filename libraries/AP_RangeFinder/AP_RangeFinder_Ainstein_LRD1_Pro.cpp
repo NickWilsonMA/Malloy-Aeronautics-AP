@@ -38,6 +38,40 @@ uint8_t crc_sum_of_bytes(const uint8_t *data, uint16_t count)
     return crc_sum_of_bytes_16(data, count) & 0xFF;
 }
 
+bool AP_RangeFinder_Ainstein_LRD1_Pro::custom_integrated_alt_cal(uint16_t alt_60Gz, uint16_t alt_24Gz, uint8_t snr60, uint8_t snr24, float &reading_m, uint8_t &snr)
+{
+    /*
+    Logic based on the recorded data is as follows:
+    1. Check the alt_60GHz < 4.55m Observed MAX on the LRD1 Pro for 60GHz
+        a. Check the SNR60 > 55
+            I. If Yes then return alt_60Gz 
+            II. If Not then check the SNR24
+                i. If SNR24 > SNR60 then return alt_24Gz
+    */
+
+    if (alt_60Gz < 455)
+    {
+        if (snr60 > 55)
+        {
+            reading_m = alt_60Gz * 0.01;
+            snr = snr60;
+            return true;
+        }
+        else
+        {
+            if (snr24 > snr60)
+            {
+                reading_m = alt_24Gz * 0.01;
+                snr = snr24;
+                return true;
+            }
+        }
+    }
+    reading_m = (snr60 > snr24) ? alt_60Gz * 0.01 : alt_24Gz * 0.01;
+    snr = (snr60 > snr24) ? snr60 : snr24;
+    return false;
+}
+
 // get_reading - read a value from the sensor
 bool AP_RangeFinder_Ainstein_LRD1_Pro::get_reading(float &reading_m)
 {
@@ -54,6 +88,8 @@ bool AP_RangeFinder_Ainstein_LRD1_Pro::get_reading(float &reading_m)
     float current_dist_reading_m = reading_m;
 
     bool has_data = false;
+    // Custom integrated mode flag
+    bool custom_integrated_data_flg = true;
     int16_t nbytes = uart->available();
 
     /* Adding the parameters to log the data */
@@ -139,11 +175,14 @@ bool AP_RangeFinder_Ainstein_LRD1_Pro::get_reading(float &reading_m)
         uint8_t snr = 0;
         /*
             Param: RNGFND1_LRD1MOD will give value:
-            0: 24GHz Mode (Default) and 1: Integrated Mode
+            0: 24GHz Mode (Default) and 1: Custom Integrated Mode
         */
         if (lrd1_freq_mode() == 1){
-            reading_m = UINT16_VALUE(buffer[13], buffer[14]) * 0.01;
-            snr = buffer[15];
+            custom_integrated_data_flg = custom_integrated_alt_cal(
+                UINT16_VALUE(buffer[3], buffer[4]),
+                UINT16_VALUE(buffer[8], buffer[9]),
+                buffer[5],
+                buffer[10], reading_m, snr);
         }
         else{
             reading_m = UINT16_VALUE(buffer[3], buffer[4]) * 0.01;
@@ -158,9 +197,13 @@ bool AP_RangeFinder_Ainstein_LRD1_Pro::get_reading(float &reading_m)
         snr_60 = buffer[10];
         snr_Int = buffer[15];
 
-        /* Validate the Data */
+        /* Validate the Data
+        Check the following:
+        1. Check the custom integrated data return flag is true
+        2. The reading_m data is < 656m
+        */
 
-        has_data = check_radar_reading(reading_m);
+        has_data = check_radar_reading(reading_m) & custom_integrated_data_flg;
 
         /*
         Check for malfunction

@@ -95,6 +95,9 @@ private:
     // Logging Function
     void Log_LRD1_Pro(uint16_t s_24, uint16_t s_60, uint16_t s_int, uint16_t s_lpf, uint8_t snr_24, uint8_t snr_60, uint8_t snr_int) const;
 
+    // Chose from 60GHz or 24GHz
+    bool custom_integrated_alt_cal(uint16_t alt_60Gz, uint16_t alt_24Gz, uint8_t snr60, uint8_t snr24, float &reading_m, uint8_t &snr);
+    
     // Validating if the reading is good
     bool check_radar_reading(float &reading_m);
 };
