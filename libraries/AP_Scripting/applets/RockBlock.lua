@@ -781,9 +781,9 @@ function HLSatcom()
 
         -- just sending armed state here for simplicity. Flight mode is in the custom_mode field
         if arming:is_armed() then
-            hl2.custom0 = 129 -- MAV_MODE_FLAG_SAFETY_ARMED + MAV_MODE_FLAG_CUSTOM_MODE_ENABLED
+            hl2.custom0 = 1 -- MAV_MODE_FLAG_SAFETY_ARMED + MAV_MODE_FLAG_CUSTOM_MODE_ENABLED (129)
         else
-            hl2.custom0 = 1 -- MAV_MODE_FLAG_CUSTOM_MODE_ENABLED
+            hl2.custom0 = 0 -- MAV_MODE_FLAG_CUSTOM_MODE_ENABLED (1)
         end
 
         local newpkt = mavlink.createMAVLink(hl2, mavlink.HIGH_LATENCY2)
