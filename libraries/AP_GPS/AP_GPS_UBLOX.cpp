@@ -227,16 +227,26 @@ const AP_GPS_UBLOX::config_list AP_GPS_UBLOX::config_MB_Rover_uart2[] {
 void
 AP_GPS_UBLOX::_request_next_config(void)
 {
-    // don't request config if we shouldn't configure the GPS
     if (gps._auto_config == AP_GPS::GPS_AUTO_CONFIG_DISABLE) {
         return;
     }
+
+    // Print detailed configuration status
+    _print_unconfigured_messages();
+    
+    GCS_SEND_TEXT(MAV_SEVERITY_INFO, "UBLOX %d: Current delay time: %d ms", 
+                  state.instance + 1, 
+                  _delay_time);
 
     // Ensure there is enough space for the largest possible outgoing message
     if (port->txspace() < (uint16_t)(sizeof(struct ubx_header)+sizeof(struct ubx_cfg_nav_rate)+2)) {
         // not enough space - do it next time
         return;
     }
+
+    GCS_SEND_TEXT(MAV_SEVERITY_INFO, "UBLOX %d: Requesting next config step: %u", 
+                  state.instance + 1, 
+                  (unsigned)_next_message);
 
     if (_unconfigured_messages == CONFIG_RATE_SOL && havePvtMsg) {
         /*
@@ -245,8 +255,6 @@ AP_GPS_UBLOX::_request_next_config(void)
          */
         _unconfigured_messages &= ~CONFIG_RATE_SOL;
     }
-
-    Debug("Unconfigured messages: 0x%x Current message: %u\n", (unsigned)_unconfigured_messages, (unsigned)_next_message);
 
     // check AP_GPS_UBLOX.h for the enum that controls the order.
     // This switch statement isn't maintained against the enum in order to reduce code churn
@@ -536,6 +544,7 @@ AP_GPS_UBLOX::read(void)
     // walk through the gps configuration at 1 message per second
     if (millis_now - _last_config_time >= _delay_time) {
         _request_next_config();
+
         _last_config_time = millis_now;
         if (_unconfigured_messages) { // send the updates faster until fully configured
             if (!havePvtMsg && (_unconfigured_messages & CONFIG_REQUIRED_INITIAL)) {
@@ -2039,6 +2048,48 @@ bool AP_GPS_UBLOX::is_healthy(void) const
 bool AP_GPS_UBLOX::supports_F9_config(void) const
 {
     return _hardware_generation == UBLOX_F9 && _hardware_generation != UBLOX_UNKNOWN_HARDWARE_GENERATION;
+}
+
+void AP_GPS_UBLOX::_print_unconfigured_messages(void) const {
+    if (_unconfigured_messages == 0) {
+        GCS_SEND_TEXT(MAV_SEVERITY_INFO, "UBLOX %d: All messages configured", 
+                      state.instance + 1);
+        return;
+    }
+
+    // List of configuration items
+    static const char *config_items[] = {
+        "navigation rate",
+        "posllh rate",
+        "status rate",
+        "solution rate",
+        "velned rate",
+        "dop rate",
+        "hw monitor rate",
+        "hw2 monitor rate",
+        "raw rate",
+        "version",
+        "navigation settings",
+        "GNSS settings",
+        "SBAS settings",
+        "PVT rate",
+        "time pulse settings",
+        "TIMEGPS rate",
+        "Time mode settings",
+        "RTK MB",
+        "TIM TM2"
+    };
+
+    GCS_SEND_TEXT(MAV_SEVERITY_INFO, "UBLOX %d: Pending configurations:", 
+                  state.instance + 1);
+    
+    for (uint8_t i = 0; i < ARRAY_SIZE(config_items); i++) {
+        if (_unconfigured_messages & (1 << i)) {
+            GCS_SEND_TEXT(MAV_SEVERITY_INFO, "UBLOX %d: - %s", 
+                         state.instance + 1, 
+                         config_items[i]);
+        }
+    }
 }
 
 #endif

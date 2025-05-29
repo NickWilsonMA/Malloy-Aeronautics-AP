@@ -901,6 +901,15 @@ void AP_GPS::update_instance(uint8_t instance)
     bool result = drivers[instance]->read();
     uint32_t tnow = AP_HAL::millis();
 
+    // Track status changes
+    static GPS_Status last_status[GPS_MAX_RECEIVERS] = {NO_GPS};
+    if (state[instance].status != last_status[instance]) {
+        GCS_SEND_TEXT(MAV_SEVERITY_INFO, "GPS %d: Status changed from %d to %d, sats: %d, delta: %d ms", 
+                     instance + 1, last_status[instance], state[instance].status, 
+                     state[instance].num_sats, timing[instance].delta_time_ms);
+        last_status[instance] = state[instance].status;
+    }
+
     // if we did not get a message, and the idle timer of 2 seconds
     // has expired, re-initialise the GPS. This will cause GPS
     // detection to run again
@@ -956,10 +965,14 @@ void AP_GPS::update_instance(uint8_t instance)
         const uint8_t *rtcm_data;
         uint16_t rtcm_len;
         if (drivers[instance]->get_RTCMV3(rtcm_data, rtcm_len)) {
+            GCS_SEND_TEXT(MAV_SEVERITY_INFO, "GPS %d: Base sending RTCM data (%d bytes) to rover, status: %d, sats: %d", 
+                         instance + 1, rtcm_len, state[instance].status, state[instance].num_sats);
             for (uint8_t i=0; i< GPS_MAX_RECEIVERS; i++) {
                 if (i != instance && _type[i] == GPS_TYPE_UBLOX_RTK_ROVER) {
                     // pass the data to the rover
                     inject_data(i, rtcm_data, rtcm_len);
+                    GCS_SEND_TEXT(MAV_SEVERITY_INFO, "GPS %d: Rover received RTCM data, status: %d, sats: %d, delta: %d ms", 
+                                i + 1, state[i].status, state[i].num_sats, timing[i].delta_time_ms);
                     drivers[instance]->clear_RTCMV3();
                     break;
                 }

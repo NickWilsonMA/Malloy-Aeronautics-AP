@@ -755,6 +755,7 @@ private:
     void        _save_cfg(void);
     void        _verify_rate(uint8_t msg_class, uint8_t msg_id, uint8_t rate);
     void        _check_new_itow(uint32_t itow);
+    void        _print_unconfigured_messages(void) const;
 
     void unexpected_message(void);
     void log_mon_hw(void);
