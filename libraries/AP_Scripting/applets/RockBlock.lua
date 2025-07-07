@@ -261,6 +261,8 @@ local function MAVLinkProcessor()
                     end
                     vehicle:set_target_location(loc)
                 end
+            elseif _mavresult.msgid == self.SET_MODE then
+                vehicle:set_mode(_mavresult.custom_mode)
             elseif _mavresult.msgid == self.COMMAND_LONG or _mavresult.msgid ==
                 self.COMMAND_INT then
                 if _mavresult.command == 400 then -- MAV_CMD_COMPONENT_ARM_DISARM
