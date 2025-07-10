@@ -90,6 +90,13 @@ RCK_DEBUG     = bind_add_param('DEBUG', 3, 0)
 RCK_ENABLE     = bind_add_param('ENABLE', 4, 1)
 
 --[[
+Returns true if the value is NaN, false otherwise
+--]]
+local function isNaN (x)
+    return (x ~= x)
+  end
+
+--[[
 Lua Object for decoding and encoding MAVLink (V1 only) messages
 --]]
 local function MAVLinkProcessor()
@@ -99,7 +106,9 @@ local function MAVLinkProcessor()
         COMMAND_LONG = 76,
         COMMAND_INT = 75,
         HIGH_LATENCY2 = 235,
-        MISSION_ITEM_INT = 73
+        MISSION_ITEM_INT = 73,
+        SET_MODE = 11,
+        MISSION_SET_CURRENT = 41
     }
 
     -- private fields
@@ -117,6 +126,8 @@ local function MAVLinkProcessor()
     _crc_extra[76] = 0x98
     _crc_extra[235] = 0xb3
     _crc_extra[73] = 0x26
+    _crc_extra[11] = 0x59
+    _crc_extra[41] = 0x1c
     
     _messages = {}
     _messages[75] = { -- COMMAND_INT
@@ -149,7 +160,12 @@ local function MAVLinkProcessor()
         {"command", "<I2"}, {"target_system", "<B"}, {"target_component", "<B"},
         {"frame", "<B"}, {"current", "<B"}, {"autocontinue", "<B"}
     }
-
+    _messages[11] = { -- SET_MODE
+        { "custom_mode", "<I4" }, { "target_system", "<B" }, { "base_mode", "<B" },
+    }
+    _messages[41] = { -- MISSION_SET_CURRENT
+        { "seq", "<I2" }, { "target_system", "<B" }, { "target_component", "<B" },
+    }
     function self.getSeqID() return _txseqid end
 
     function self.generateCRC(buffer)
@@ -169,10 +185,10 @@ local function MAVLinkProcessor()
         -- returns true if a packet was decoded, false otherwise
         _mavbuffer = _mavbuffer .. string.char(byte)
 
-        -- parse buffer to find MAVLink packets
-        if #_mavbuffer == 1 and string.byte(_mavbuffer, 1) == PROTOCOL_MARKER_V1 and
-            _mavdecodestate == 0 then
-            -- we have a packet start
+        -- check if this is a start of packet
+        if _mavdecodestate == 0 and byte == PROTOCOL_MARKER_V1 then
+            -- we have a packet start, discard the buffer before this byte
+            _mavbuffer = string.char(byte)
             _mavdecodestate = 1
             return
         end
@@ -184,8 +200,12 @@ local function MAVLinkProcessor()
             _payload_len, read_marker = string.unpack("<B", _mavbuffer,
                                                       read_marker) -- payload is always the second byte
             -- fetch seq/sysid/compid
-            _mavresult.seq, _mavresult.sysid, _mavresult.compid, read_marker =
-                string.unpack("<BBB", _mavbuffer, read_marker)
+            _mavresult.seq, read_marker =
+                string.unpack("<B", _mavbuffer, read_marker)
+            _mavresult.sysid, read_marker =
+                string.unpack("<B", _mavbuffer, read_marker)
+            _mavresult.compid, read_marker =
+                string.unpack("<B", _mavbuffer, read_marker)
             -- fetch the message id
             _mavresult.msgid, _ = string.unpack("<B", _mavbuffer, read_marker)
 
@@ -246,6 +266,9 @@ local function MAVLinkProcessor()
                                                              offset)
                 end
             end
+            if RCK_DEBUG:get() == 1 then
+                gcs:send_text(3, "Rockblock :: message id " .. tostring(_mavresult.msgid))
+            end
             -- only process COMMAND_LONG and COMMAND_INT and  MISSION_ITEM_INT messages
             if _mavresult.msgid == self.MISSION_ITEM_INT then
                 -- goto somewhere (guided mode target)
@@ -262,6 +285,8 @@ local function MAVLinkProcessor()
                     vehicle:set_target_location(loc)
                 end
             elseif _mavresult.msgid == self.SET_MODE then
+                gcs:send_text(3, "Rockblock: Set mode to " ..
+                                  tostring(_mavresult.custom_mode))
                 vehicle:set_mode(_mavresult.custom_mode)
             elseif _mavresult.msgid == self.COMMAND_LONG or _mavresult.msgid ==
                 self.COMMAND_INT then
@@ -316,7 +341,10 @@ local function MAVLinkProcessor()
         end
 
         -- packet too big ... start again
-        if #_mavbuffer > 263 then _mavbuffer = "" end
+        if #_mavbuffer > 263 then 
+            _mavbuffer = ""
+            _mavdecodestate = 0
+        end
         return false
     end
 
@@ -804,7 +832,7 @@ end
 function protected_wrapper()
     local success, err = pcall(HLSatcom)
     if not success then
-        gcs:send_text(MAV_SEVERITY_ERROR, "Internal Error: " .. err)
+        gcs:send_text(3, "Internal Error: " .. err)
         -- when we fault we run the HLSatcom function again after 1s, slowing it
         -- down a bit so we don't flood the console with errors
         return protected_wrapper, 1000
