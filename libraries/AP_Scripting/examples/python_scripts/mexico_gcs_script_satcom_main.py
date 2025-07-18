@@ -16,7 +16,7 @@ MAVProxy cmd to use to connect:
 mavproxy.py --master=udpout:127.0.0.1:16000 --streamrate=1 --console --mav10 --map
 
 '''
-from argparse import ArgumentParser
+from argparse import Namespace
 from datetime import datetime, timedelta, timezone
 import json
 import sys
@@ -133,8 +133,9 @@ def send_data_to_cloudloop(thing, token, data):
         c_print("Sent {0} bytes OK".format(len(data)/2))
 
 
-if __name__ == '__main__':
+def main():
     'The main function to run the script'
+    '''
     # Parse the command line arguments
     parser = ArgumentParser(description='RockBlock SBD to MAVLink gateway')
     parser.add_argument("-imei", help="Iridium Modem IMEI")
@@ -150,6 +151,13 @@ if __name__ == '__main__':
                         default=False, help="Use MAVLink 2.0 on -out")
 
     args = parser.parse_args()
+    '''
+
+    # Reading parameters from JSON file"
+    with open("config.json") as f:
+        config_dict = json.load(f)
+
+    args = Namespace(**config_dict)
 
     # previous packet time stamp
     lastpacket_time = script_start_time.replace(hour=0, minute=0, second=0)
@@ -292,3 +300,11 @@ if __name__ == '__main__':
 
         print(f"Sleeping time delay :: {TIME_DELAY} seconds")
         time.sleep(TIME_DELAY)
+
+
+if __name__ == '__main__':
+    try:
+        main()
+    except KeyboardInterrupt:
+        c_print("Keyboard interrupt, exiting...")
+        sys.exit(0)
