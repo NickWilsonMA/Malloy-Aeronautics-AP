@@ -16,7 +16,8 @@ MAVProxy cmd to use to connect:
 mavproxy.py --master=udpout:127.0.0.1:16000 --streamrate=1 --console --mav10 --map
 
 '''
-from argparse import ArgumentParser
+#from argparse import ArgumentParser
+from argparse import Namespace
 from datetime import datetime, timedelta, timezone
 import json
 import sys
@@ -52,6 +53,7 @@ ROCK7_TX_ERRORS = {'10': 'Invalid login credentials',
 
 # Note command_long and command_int are allowed, but only certain commands
 ALLOWABLE_MESSAGES = ["MISSION_ITEM_INT",
+                      "SET_POSITION_TARGET_GLOBAL_INT",
                       "MISSION_SET_CURRENT",
                       "SET_MODE"]
 
@@ -133,9 +135,11 @@ def send_data_to_cloudloop(thing, token, data):
         c_print("Sent {0} bytes OK".format(len(data)/2))
 
 
-if __name__ == '__main__':
+#if __name__ == '__main__':
+def main():
     'The main function to run the script'
     # Parse the command line arguments
+    '''
     parser = ArgumentParser(description='RockBlock SBD to MAVLink gateway')
     parser.add_argument("-imei", help="Iridium Modem IMEI")
     parser.add_argument("-out", default="udpout:127.0.0.1:16000",
@@ -150,6 +154,13 @@ if __name__ == '__main__':
                         default=False, help="Use MAVLink 2.0 on -out")
 
     args = parser.parse_args()
+    '''
+
+    # Reading parameters from json file instead of parsing command line arguments
+    with open("config.json") as f:
+        config_dict = json.load(f)
+
+    args = Namespace(**config_dict)
 
     # previous packet time stamp
     lastpacket_time = script_start_time.replace(hour=0, minute=0, second=0)
@@ -228,6 +239,12 @@ if __name__ == '__main__':
 
                                     # lastpacket_time = datetime.now().replace(tzinfo=timezone.utc)
                                     print(f"Last packet time: {lastpacket_time}")
+                                if msg.get_type() == "MISSION_ITEM_INT":
+                                    c_print("MISSION_ITEM_INT message received!!!")
+                                    mavGCS.mav.send(msg, force_mavlink1=True)
+                                    c_print(f"Sent message to GCS: {msg.get_type()}")
+                                    lastpacket_time = datetime.strptime(
+                                        first_record['at'], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc)
                         except Exception as e:
                             c_print(f"Error decoding hex data: {e}")
 
@@ -292,3 +309,11 @@ if __name__ == '__main__':
 
         print(f"Sleeping time delay :: {TIME_DELAY} seconds")
         time.sleep(TIME_DELAY)
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        c_print("Keyboard interrupt, exiting...")
+        sys.exit(0)
