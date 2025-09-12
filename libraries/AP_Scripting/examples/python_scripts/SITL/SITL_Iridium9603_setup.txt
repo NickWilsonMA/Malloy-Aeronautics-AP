@@ -1,0 +1,252 @@
+- Connect Iridium 9603 to laptop via UART-TTL USB adapter
+
+
+- Make note of COM port number (as displayed in Device Manager)
+
+
+- Make note of laptop's own IPv4 address (only tried with 'Wireless' but 'Ethernet' should also work)
+
+	Windows PowerShell:
+
+	$ ipconfig
+
+
+- Run the Python script named "serial_gateway.py" (if necessary, edit the COM port number on line 6 before running the script)
+
+	Windows PowerShell:
+
+	$ python serial_gateway.py
+
+	Expected output:
+
+	Listening for TCP connections on 0.0.0.0:5000...
+
+
+- Launch WSL as administrator (it's useful to have tmux or something similar installed and divide screen between the following processes)
+
+	WSL:
+
+	$ sudo apt install tmux
+
+	$ tmux -2
+
+	Ctrl + '%' 					: split screen vertically
+	Ctrl + '2' 					: split screen horizontally
+	Ctrl + 'b' & Arrow Keys 	: navigate between window panes.
+	Ctrl + 'b' & 'c'			: new window
+	Ctrl + 'b' & 'n'			: next window
+	Ctrl + 'b' & 'p'			: previous window
+
+
+- Create virtual serial port using socat (install with 'apt install socat' if necessary)
+
+	WSL:
+
+	$ sudo socat -d -d PTY,link=/dev/iridium,raw,echo=0,mode=666 TCP:<your_IP>:5000
+
+	Expected output:
+
+	2025/08/05 16:58:04 socat[2494] N PTY is /dev/pts/7
+	2025/08/05 16:58:04 socat[2494] N opening connection to AF=2 192.168.4.26:5000
+	2025/08/05 16:58:04 socat[2494] N successfully connected from local address AF=2 172.20.15.46:50538
+	2025/08/05 16:58:04 socat[2494] N starting data transfer loop with FDs [5,5] and [7,7]
+
+
+- Check virtual serial connection to Iridium9603
+
+	WSL:
+
+	$ sudo echo -ne "AT\r" > /dev/iridium
+
+	$ sudo cat < /dev/iridium
+
+	Expected output:
+
+	AT
+	OK
+
+	Some other AT commands to try:
+	
+	AT+CGMI	---> Manufacturer
+	AT+CGMM ---> Model
+	AT+CGMR ---> Firmware version
+	AT+GSN	---> Serial number (IMEI)
+	AT+CSQ	---> Signal strength
+
+
+- Make sure ArduCopter firmware build is configured for SITL
+
+	WSL:
+
+	$ cd <path_to_your_ardupilot_repo>
+
+	$ ./waf configure --board sitl
+
+
+- Create directory called 'scripts' inside ./Tools/autotest
+
+	WSL:
+
+	$ cd Tools/autotest
+
+	$ mkdir scripts
+
+
+- Create a copy of the script "RockBlock.lua" in "scripts" (Make sure to have only one .lua file inside /scripts)
+
+
+- Open the parameter list "mav.parm" in a plain text editor and make sure that the values of the following parameters are set correctly:
+
+	SCR_ENABLED			= 1
+	SERIAL2_PROTOCOL	= 28	(make sure no other serial port has the same value set for SERIALX_PROTOCOL!)
+	SERIAL2_BAUD		= 19200
+	RCK_ENABLE			= 1
+	RCK_FORCEHL			= 1
+	RCK_PERIOD			= 10
+	RCK_TIMEOUT			= 5
+
+	Alternatively, parameter values can be changed after connecting to SITL with MissionPlanner  
+
+
+- Launch sim_vehicle.py (the ArduCopter firmware will be automatically built for SITL at this stage, if done for the first time)
+
+	WSL:
+
+	$ cd Tools/autotest (if not in there already)
+
+	$ ./sim_vehicle.py -v ArduCopter -f quad --out=udp:127.0.0.1:14550 -A "--serial2=uart:/dev/iridium"
+
+	Expected output:
+
+	...
+	...
+	...
+	'build' finished successfully (4.781s)
+	SIM_VEHICLE: Using defaults from (default_params/copter.parm)
+	SIM_VEHICLE: Run ArduCopter
+	SIM_VEHICLE: "/home/ben/doc/git/ardupilot/Tools/autotest/run_in_terminal_window.sh" "ArduCopter" "/home/ben/doc/git/ardupilot/build/sitl/bin/arducopter" "--model" "+" "--speedup" "1" "--slave" "0" "--serial2=uart:/dev/iridium" "--defaults" "default_params/copter.parm" "--sim-address=127.0.0.1" "-I0"
+	RiTW: Starting ArduCopter : /home/ben/doc/git/ardupilot/build/sitl/bin/arducopter --model + --speedup 1 --slave 0 --serial2=uart:/dev/iridium --defaults default_params/copter.parm --sim-address=127.0.0.1 -I0
+	SIM_VEHICLE: Run MavProxy
+	SIM_VEHICLE: "mavproxy.py" "--retries" "5" "--out" "172.20.0.1:14550" "--master" "tcp:127.0.0.1:5760" "--sitl" "127.0.0.1:5501" "--out" "udp:127.0.0.1:14550"
+	Connect tcp:127.0.0.1:5760 source_system=255
+	Log Directory:
+	Telemetry log: mav.tlog
+	Waiting for heartbeat from tcp:127.0.0.1:5760
+	AP: RCInput: decoding UDP (Pulses)
+	AP: Calibrating barometer
+	Detected vehicle 1:1 on link 0
+	online system 1
+	STABILIZE> Mode STABILIZE
+	AP: ArduCopter V4.7.0-dev (963bca7f)
+	AP: f13d8fcaa0e44ddda2b6bf509bf2bbe6
+	AP: Frame: QUAD/PLUS
+	AP: Barometer 1 calibration complete
+	AP: Barometer 2 calibration complete
+	Init Gyro**Received 1361 parameters (ftp)
+	Saved 1361 parameters to mav.parm
+	Lua: State memory usage: 4824 + 10822                                                                                                                                                                                                               
+	AP: ArduPilot Ready
+	AP: AHRS: DCM active
+	AP: Rockblock: Trying to detect modem
+	AP: RC7: SaveWaypoint LOW
+	AP: Rockblock: Trying to detect modem
+	AP: EKF3 IMU0 initialised
+	AP: EKF3 IMU1 initialised
+	AP: AHRS: EKF3 active
+	AP: Rockblock: Trying to detect modem
+	AP: EKF3 IMU0 tilt alignment complete
+	AP: EKF3 IMU1 tilt alignment complete
+	AP: Rockblock: Trying to detect modem
+	AP: EKF3 IMU0 MAG0 initial yaw alignment complete
+	AP: EKF3 IMU1 MAG0 initial yaw alignment complete
+	AP: Rockblock: Trying to detect modem
+	AP: Rockblock: Trying to detect modem
+	AP: GPS 1: probing for u-blox at 230400 baud
+	AP: GPS 1: detected u-blox
+	AP: Rockblock: Trying to detect modem
+	AP: Rockblock modem detected - IRIDIUM 9600 Family SBD Transceiver
+
+
+- Launch Mission Planner.
+
+	If SITL is already running, MissionPlanner will connect to it via UDP automatically,
+	otherwise, use the drop-down in the top right corner and enter '14550' for port number.
+
+	Switch to the 'PLAN' tab to read waypoints stored in the EEPROM of the aircraft, or specify new path.
+	Make sure to select the "TAKEOFF" command for waypoint #1, 'Frame' should be set to "Relative" for all waypoints.
+	Select the "LAND" command for the last waypoint, but this is not strictly necessary
+
+	When finished with planning the new mission, click "Write" on the panel to the right.
+
+	Switch back to the "DATA" tab and go to "Actions". The aircraft should now be in "Stabilize" mode.
+	To arm the aircraft, click the "Arm/Disarm" button, use "Force Arm" if necessary.
+	To take off, select "Mission_Start" from the drop-down next to the "Do Action" button, click "Do Action"
+	and "Yes" in the next dialogue.
+
+	At this point the simulated aircraft should take off and start executing the mission.
+
+
+- Run the Python script named "mexico_gcs_script_satcom_main.py" in PowerShell
+
+	Make sure that the parameters in the file config.json are correct and that CloudLoop account is accessible
+	via the web interface. Use Mert's email address as login name and Malloy123456! as password.
+
+	Windows PowerShell:
+
+	$ python mexico_gcs_script_satcom_main.py
+
+	This script starts a UDP server on port 16000, periodically checks the CloudLoop mailbox for incoming high-latency
+	MAVLink messages from the aircraft and relays them to the GCS. It also takes MAVLink messages from the GCS and sends
+	them to the CloudLoop server, where the aircraft can access them using the Iridium modem.
+
+
+- Launch QGC (make sure to use "Malloy QGC Mex-v1.0.11")
+
+	Click the gear icon in the top left corner and then "Application Settings"
+	Choose "Comm Links" on the left and click "Add".
+	Enter a name for the new link, tick the box next to "High Latency" and pick "UDP" from the "Type" drop-down.
+	Enter "16000" for port and save the link by clicking "OK".
+
+	Once the link is created, click "Connect" on it and go back to the main screen.
+
+	At this point we should see the position and heading of the simulated aircraft on the map, the SITL default location
+	is an airfield just outside Canberra, Australia.
+
+
+- Run the Python script named "waypoint_test.py" in PowerShell
+
+	The script sends a COMMAND_LONG (76) MAVLink message with the command MAV_CMD_DO_SET_MODE to the aircraft which is an
+	instruction to switch to "Guided" mode. The aircraft needs to be in this flight mode to be able to accept a new waypoint.
+	The script sends the new waypoint after a 5 second delay, using the SET_POSITION_TARGET_GLOBAL_INT MAVLink message.
+
+	The expected outcome is that upon receiving the MAV_CMD_DO_SET_MODE command, the aircraft stops executing the mission, and
+	on receiving SET_POSITION_TARGET_GLOBAL_INT, starts flying to the new waypoint in a straight line.
+
+	Switching back to "Auto" mode, will result in the aircraft resuming the mission by flying to the waypoint which was going to
+	be the next to reach had the mission not been aborted by the MAVLink messages sent by the Python script.
+
+
+	Progress so far (06/08/2025):
+
+	When set up correctly, sim_vehicle.py runs without errors, MissionPlanner connects to SITL automatically, the aircraft can
+	take off, execute the mission, land, etc.
+	The Lua script successfully detects the Iridium9603 modem and starts sending HIGH_LATENCY2 (235) messages to CloudLoop, where
+	QGC combined with the Python script mexico_gcs_script_satcom_main.py can read these messages and display the position and heading
+	of the aircraft on the map.
+	The Lua script does receive messages sent by the script waypoint_test.py, but at present parsing the messages isn't working correctly.
+
+	When the script waypoint_test.py sent the messages via TCP instead of the CloudLoop API at a previous stage of testing, it was found
+	that both messages had to be sent twice for them to take effect, it is yet to be determined whether this issue persists when switching
+	to CloudLoop. If it does, it needs to be confirmed that both messages arrive to the aircraft and if so the Lua script should be tweaked
+	to keep calling the appropriate methods on the vehicle inside a loop as many times as necessary to achieve the expected outcome.
+
+	TODO:
+
+	Test and debug the parsing logic in the Lua script in isolation using messages already stored on the CloudLoop server.
+
+	Double check the design of the main loop in the Lua script, at present it only checks for new messages when sending HIGH_LATENCY2
+	packets to CloudLoop which happens at 30 second intervals, it should probably be checking for incoming messages at a much higher
+	frequency - the main loop runs at 10 Hz at the moment.
+
+	Fix issue with the build system, at the moment all of the above steps work only with the vanilla version of the firmware, when built for
+	SITL the Malloy firmware produces errors at runtime and it's not possible to take of and start a mission with sim_vehicle.
