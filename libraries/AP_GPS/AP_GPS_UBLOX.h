@@ -282,6 +282,8 @@ private:
         MSGOUT_RTCM_3X_TYPE1230_UART2   = 0x20910305,
         MSGOUT_UBX_NAV_RELPOSNED_UART2  = 0x2091008f,
 
+        // Message output for UBX MON COMMS on UART2 for debugging
+        MSGOUT_UBX_MON_COMMS_UART2     = 0x20910351,
     };
     struct PACKED ubx_cfg_valset {
         uint8_t version;
