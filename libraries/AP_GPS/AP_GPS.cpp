@@ -959,7 +959,7 @@ void AP_GPS::update_instance(uint8_t instance)
             for (uint8_t i=0; i< GPS_MAX_RECEIVERS; i++) {
                 if (i != instance && _type[i] == GPS_TYPE_UBLOX_RTK_ROVER) {
                     // pass the data to the rover
-                    inject_data(i, rtcm_data, rtcm_len);
+                    // inject_data(i, rtcm_data, rtcm_len);
                     drivers[instance]->clear_RTCMV3();
                     break;
                 }
