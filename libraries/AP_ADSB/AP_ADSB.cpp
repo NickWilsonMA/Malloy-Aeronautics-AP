@@ -668,6 +668,10 @@ void AP_ADSB::handle_transceiver_report(const mavlink_channel_t chan, const mavl
     if (out_state.chan != chan) {
         gcs().send_text(MAV_SEVERITY_DEBUG, "ADSB: Found transceiver on channel %d", chan);
     }
+    
+    // ABHISHEK Temp Code for forwarding health reoprt to GCS via telem port 
+    const mavlink_channel_t chan_mcu = (mavlink_channel_t)(MAVLINK_COMM_1);
+    mavlink_msg_uavionix_adsb_transceiver_health_report_send_struct(chan_mcu, &packet);
 
     out_state.chan_last_ms = AP_HAL::millis();
     out_state.chan = chan;
