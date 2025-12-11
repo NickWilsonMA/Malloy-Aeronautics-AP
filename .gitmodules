@@ -34,3 +34,7 @@
 [submodule "modules/DroneCAN/libcanard"]
 	path = modules/DroneCAN/libcanard
 	url = https://github.com/DroneCAN/libcanard
+[submodule "modules/Micro-CDR"]
+	path = modules/Micro-CDR
+	url = https://github.com/ardupilot/Micro-CDR.git
+	branch = master
