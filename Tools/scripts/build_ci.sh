@@ -361,12 +361,12 @@ for t in $CI_BUILD_TARGET; do
         sudo apt-get install -y python3-dev
         python3 -m pip install pymonocypher
         ./Tools/scripts/signing/generate_keys.py testkey
-        $waf configure --board CubeOrange-ODID --signed-fw --private-key testkey_private_key.dat
+        $waf configure --board CubeOrange --signed-fw --private-key testkey_private_key.dat
         $waf copter
-        $waf configure --board MatekL431-DShot --signed-fw --private-key testkey_private_key.dat
+        $waf configure --board mRoControlZeroOEMH7 --signed-fw --private-key testkey_private_key.dat
         $waf AP_Periph
-        ./Tools/scripts/build_bootloaders.py --signing-key testkey_public_key.dat CubeOrange-ODID
-        ./Tools/scripts/build_bootloaders.py --signing-key testkey_public_key.dat MatekL431-DShot
+        ./Tools/scripts/build_bootloaders.py --signing-key testkey_public_key.dat CubeOrange
+        ./Tools/scripts/build_bootloaders.py --signing-key testkey_public_key.dat mRoControlZeroOEMH7
         continue
     fi
     
