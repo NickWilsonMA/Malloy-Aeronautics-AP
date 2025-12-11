@@ -312,6 +312,22 @@ for t in $CI_BUILD_TARGET; do
         continue
     fi
 
+    if [ "$t" == "MatekH743" ]; then
+        echo "Building MatekH743"
+        $waf configure --board MatekH743
+        $waf clean
+        $waf copter
+        continue
+    fi
+
+    if [ "$t" == "mRoControlZeroOEMH7" ]; then
+        echo "Building mRoControlZeroOEMH7"
+        $waf configure --board mRoControlZeroOEMH7
+        $waf clean
+        $waf copter
+        continue
+    fi
+
     if [ "$t" == "navigator" ]; then
         echo "Building navigator"
         $waf configure --board navigator --toolchain=arm-linux-musleabihf

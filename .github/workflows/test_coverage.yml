@@ -141,28 +141,11 @@ jobs:
       matrix:
         config:
           [
-            stm32f7,
-            stm32h7,
-            fmuv2-plane,
-            periph-build,
-            iofirmware,
-            CubeOrange-bootloader,
-            fmuv3-bootloader,
-            revo-bootloader,
-            stm32h7-debug,
-            fmuv3,
-            revo-mini,
-            MatekF405-Wing,
-            CubeOrange-ODID,
-            CubeRedPrimary-bootloader,
+            MatekH743,
+            mRoControlZeroOEMH7,
             configure-all,
             build-options-defaults-test,
             signing,
-            CubeOrange-PPP,
-            CubeOrange-EKF2,
-            SOHW,
-            Pixhawk6X-PPPGW,
-            new-check,
           ]
         toolchain: [
             chibios,

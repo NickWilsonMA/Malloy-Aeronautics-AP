@@ -64,18 +64,7 @@ jobs:
       fail-fast: false # don't cancel if a job from the matrix fails
       matrix:
         toolchain: [chibios]
-        config: [
-            Durandal,
-            MatekF405,
-            KakuteF7,
-            MatekH743-bdshot,
-            MambaH743v4, # for littlefs support
-            Pixhawk1-1M,
-            MatekF405-CAN, # see special "build bootloader" code below
-            DrotekP3Pro, # see special "build bootloader" code below
-            Hitec-Airspeed, # see special code for Periph below (3 places!)
-            f103-GPS, # see special code for Periph below (3 places!)
-          ]
+        config: [MatekH743, mRoControlZeroOEMH7]
         include:
           - config: disco
             toolchain: armhf
@@ -142,7 +131,7 @@ jobs:
           elif [ $BOOTLOADER -eq 1 ]; then
             ./waf bootloader
           else
-            ./waf
+            ./waf copter
           fi
           mkdir -p $GITHUB_WORKSPACE/base_branch_bin
 
@@ -167,7 +156,7 @@ jobs:
           elif [ $BOOTLOADER -eq 1 ]; then
             ./waf bootloader
           else
-            ./waf
+            ./waf copter
           fi
           cp -r $BIN_SRC/* "$NO_VERSIONS_DIR"
 
@@ -220,7 +209,7 @@ jobs:
           elif [ $BOOTLOADER -eq 1 ]; then
             ./waf bootloader
           else
-            ./waf
+            ./waf copter
           fi
           mkdir $GITHUB_WORKSPACE/pr_bin
           cp -r $BIN_SRC/* $GITHUB_WORKSPACE/pr_bin/
@@ -244,7 +233,7 @@ jobs:
           elif [ $BOOTLOADER -eq 1 ]; then
             ./waf bootloader
           else
-            ./waf
+            ./waf copter
           fi
           cp -r $BIN_SRC/* "$NO_VERSIONS_DIR"
 

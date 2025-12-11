@@ -48,7 +48,7 @@ jobs:
         timeout-minutes: 30
         env:
           DEBIAN_FRONTEND: noninteractive
-          TZ: Europe/Paris
+          TZ: Europe/London
         shell: 'script -q -e -c "bash {0}"'
         run: |
           case ${{matrix.os}} in
@@ -81,7 +81,7 @@ jobs:
         env:
           DISABLE_MAVNATIVE: True
           DEBIAN_FRONTEND: noninteractive
-          TZ: Europe/Paris
+          TZ: Europe/London
           SKIP_AP_GIT_CHECK: 1
         shell: 'script -q -e -c "bash {0}"'
         run: |
@@ -110,7 +110,7 @@ jobs:
         env:
           DISABLE_MAVNATIVE: True
           DEBIAN_FRONTEND: noninteractive
-          TZ: Europe/Paris
+          TZ: Europe/London
         shell: 'script -q -e -c "bash {0}"'
         run: |
           git config --global --add safe.directory ${GITHUB_WORKSPACE}
@@ -118,14 +118,14 @@ jobs:
           source $HOME/venv-ardupilot/bin/activate || true
           git config --global --add safe.directory /__w/ardupilot/ardupilot
           ./waf configure
-          ./waf rover
+          ./waf copter
 
       - name: test build Chibios ${{matrix.os}}.${{matrix.name}}
         if: matrix.os != 'alpine'
         env:
           DISABLE_MAVNATIVE: True
           DEBIAN_FRONTEND: noninteractive
-          TZ: Europe/Paris
+          TZ: Europe/London
         shell: 'script -q -e -c "bash {0}"'
         run: |
           git config --global --add safe.directory ${GITHUB_WORKSPACE}
@@ -138,8 +138,8 @@ jobs:
               ;;
           esac
           git config --global --add safe.directory /__w/ardupilot/ardupilot
-          ./waf configure --board CubeOrange
-          ./waf plane
+          ./waf configure --board mRoControlZeroOEMH7
+          ./waf copter
 
   build-alpine: # special case for alpine as it doesn't have bash by default
     runs-on: ubuntu-22.04
@@ -151,7 +151,7 @@ jobs:
         timeout-minutes: 30
         env:
           DEBIAN_FRONTEND: noninteractive
-          TZ: Europe/Paris
+          TZ: Europe/London
         run: |
           apk update && apk add --no-cache git
       - uses: actions/checkout@v6
@@ -161,7 +161,7 @@ jobs:
         timeout-minutes: 60
         env:
           DISABLE_MAVNATIVE: True
-          TZ: Europe/Paris
+          TZ: Europe/London
           SKIP_AP_GIT_CHECK: 1
         run: |
           PATH="/github/home/.local/bin:$PATH"
@@ -169,9 +169,9 @@ jobs:
       - name: test build SITL alpine
         env:
           DISABLE_MAVNATIVE: True
-          TZ: Europe/Paris
+          TZ: Europe/London
         run: |
           git config --global --add safe.directory ${GITHUB_WORKSPACE}
           git config --global --add safe.directory /__w/ardupilot/ardupilot
           ./waf configure
-          ./waf rover
+          ./waf copter
