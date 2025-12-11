@@ -569,13 +569,11 @@ for t in $CI_BUILD_TARGET; do
              --no-disable-all \
              --no-disable-none \
              --no-disable-in-turn \
-             --no-enable-in-turn \
              --board=CubeOrange \
              --build-targets=copter
         echo "Checking all/none options in build_options.py work"
         time ./Tools/autotest/test_build_options.py \
              --no-disable-in-turn \
-             --no-enable-in-turn \
              --build-targets=copter
         echo "Checking building with logging disabled works"
         echo "define HAL_LOGGING_ENABLED 0" >/tmp/extra.hwdef
