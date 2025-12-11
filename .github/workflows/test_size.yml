@@ -74,6 +74,8 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
+          ref: ${{ github.event.pull_request.base.ref }}
+          path: base_branch
           submodules: 'recursive'
       # Put ccache into github cache for faster build
       - name: Prepare ccache timestamp
