@@ -38,3 +38,10 @@
 	path = modules/Micro-CDR
 	url = https://github.com/ardupilot/Micro-CDR.git
 	branch = master
+[submodule "modules/Micro-XRCE-DDS-Client"]
+	path = modules/Micro-XRCE-DDS-Client
+	url = https://github.com/ardupilot/Micro-XRCE-DDS-Client.git
+	branch = master
+[submodule "modules/lwip"]
+	path = modules/lwip
+	url = https://github.com/ArduPilot/lwip.git
