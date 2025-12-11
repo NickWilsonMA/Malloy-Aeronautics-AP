@@ -1,9 +1,17 @@
 name: test environment setup
 on:
   schedule:
-    - cron: '0 0 * * 6'  # every saturday at midnight
+    - cron: '0 0 * * 6' # every saturday at midnight
   workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/test_environment.yml'
+      - 'Tools/environment_install/**'
 
+  pull_request:
+    paths:
+      - '.github/workflows/test_environment.yml'
+      - 'Tools/environment_install/**'
 
 concurrency:
   group: ci-${{github.workflow}}-${{ github.ref }}
@@ -11,26 +19,28 @@ concurrency:
 
 jobs:
   build:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     container:
       image: ${{matrix.os}}:${{matrix.name}}
       options: --privileged
     strategy:
-      fail-fast: false  # don't cancel if a job from the matrix fails
+      fail-fast: false # don't cancel if a job from the matrix fails
       matrix:
         include:
           - os: ubuntu
-            name: bionic
-          - os: ubuntu
             name: focal
           - os: ubuntu
-            name: hirsute
+            name: jammy
+          - os: ubuntu
+            name: noble
           - os: archlinux
             name: latest
           - os: debian
-            name: bullseye
+            name: trixie
           - os: debian
-            name: buster
+            name: bookworm
+          - os: debian
+            name: bullseye
     steps:
       - name: Install Git
         timeout-minutes: 30
@@ -44,7 +54,6 @@ jobs:
           apt-get update && apt-get install --no-install-recommends -qy \
           lsb-release \
           sudo \
-          git \
           software-properties-common
           add-apt-repository ppa:git-core/ppa -y
           apt-get update && apt-get install --no-install-recommends -qy git
@@ -54,19 +63,19 @@ jobs:
           lsb-release \
           sudo \
           git \
-          software-properties-common
+          ca-certificates
           ;;
           *"archlinux"*)
-          pacman -Sy --noconfirm --needed git sudo
+          pacman -Syu --noconfirm --needed git sudo
           ;;
           esac
 
       # git checkout the PR
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v6
         with:
-            submodules: 'recursive'
+          submodules: 'recursive'
       - name: test install environment ${{matrix.os}}.${{matrix.name}}
-        timeout-minutes: 30
+        timeout-minutes: 60
         env:
           DISABLE_MAVNATIVE: True
           DEBIAN_FRONTEND: noninteractive
@@ -90,31 +99,36 @@ jobs:
             *"archlinux"*)
             cp /etc/skel/.bashrc /root
             cp /etc/skel/.bashrc /github/home
-            git config --global --add safe.directory /__w/ardupilot/ardupilot
+            git config --global --add safe.directory ${GITHUB_WORKSPACE}
             Tools/environment_install/install-prereqs-arch.sh -qy
             ;;
           esac
 
-      - name: test build STIL ${{matrix.os}}.${{matrix.name}}
+      - name: test build SITL ${{matrix.os}}.${{matrix.name}}
         env:
           DISABLE_MAVNATIVE: True
           DEBIAN_FRONTEND: noninteractive
           TZ: Europe/Paris
         shell: 'script -q -e -c "bash {0}"'
         run: |
+          git config --global --add safe.directory ${GITHUB_WORKSPACE}
           source ~/.bashrc
+          source $HOME/venv-ardupilot/bin/activate || true
           git config --global --add safe.directory /__w/ardupilot/ardupilot
           ./waf configure
           ./waf rover
 
       - name: test build Chibios ${{matrix.os}}.${{matrix.name}}
+        if: matrix.os != 'alpine'
         env:
           DISABLE_MAVNATIVE: True
           DEBIAN_FRONTEND: noninteractive
           TZ: Europe/Paris
         shell: 'script -q -e -c "bash {0}"'
         run: |
+          git config --global --add safe.directory ${GITHUB_WORKSPACE}
           source ~/.bashrc
+          source $HOME/venv-ardupilot/bin/activate || true
           case ${{matrix.os}} in
             *"archlinux"*)
               export PATH=/opt/gcc-arm-none-eabi-10-2020-q4-major/bin:$PATH
@@ -124,3 +138,38 @@ jobs:
           git config --global --add safe.directory /__w/ardupilot/ardupilot
           ./waf configure --board CubeOrange
           ./waf plane
+
+  build-alpine: # special case for alpine as it doesn't have bash by default
+    runs-on: ubuntu-22.04
+    container:
+      image: alpine:latest
+      options: --privileged
+    steps:
+      - name: Install Git
+        timeout-minutes: 30
+        env:
+          DEBIAN_FRONTEND: noninteractive
+          TZ: Europe/Paris
+        run: |
+          apk update && apk add --no-cache git
+      - uses: actions/checkout@v6
+        with:
+          submodules: 'recursive'
+      - name: test install environment alpine
+        timeout-minutes: 60
+        env:
+          DISABLE_MAVNATIVE: True
+          TZ: Europe/Paris
+          SKIP_AP_GIT_CHECK: 1
+        run: |
+          PATH="/github/home/.local/bin:$PATH"
+          Tools/environment_install/install-prereqs-alpine.sh
+      - name: test build SITL alpine
+        env:
+          DISABLE_MAVNATIVE: True
+          TZ: Europe/Paris
+        run: |
+          git config --global --add safe.directory ${GITHUB_WORKSPACE}
+          git config --global --add safe.directory /__w/ardupilot/ardupilot
+          ./waf configure
+          ./waf rover
