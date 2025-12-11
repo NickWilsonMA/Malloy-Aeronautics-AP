@@ -25,7 +25,7 @@ autotest_args=""
 
 # If CI_BUILD_TARGET is not set, build 4 different ones
 if [ -z "$CI_BUILD_TARGET" ]; then
-    CI_BUILD_TARGET="sitl linux fmuv3 omnibusf4pro-one"
+    CI_BUILD_TARGET="sitl linux MatekH743 mRoControlZeroOEMH7"
 fi
 
 waf=modules/waf/waf-light
