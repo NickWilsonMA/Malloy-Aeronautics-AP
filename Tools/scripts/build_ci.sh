@@ -328,6 +328,14 @@ for t in $CI_BUILD_TARGET; do
         continue
     fi
 
+    if [ "$t" == "CubeOrange" ]; then
+        echo "Building CubeOrange"
+        $waf configure --board CubeOrange
+        $waf clean
+        $waf copter
+        continue
+    fi
+
     if [ "$t" == "navigator" ]; then
         echo "Building navigator"
         $waf configure --board navigator --toolchain=arm-linux-musleabihf
