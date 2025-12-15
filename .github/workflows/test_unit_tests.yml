@@ -152,7 +152,7 @@ jobs:
           PYTHONPATH: '${{ github.workspace }}/Tools/scripts:${{ github.workspace }}/modules/mavlink/pymavlink'
         if: matrix.config == 'unit-tests'
         run: |
-          Tools/autotest/unittest/extract_param_defaults_unittest.py
+          python3 Tools/autotest/unittest/extract_param_defaults_unittest.py
 
       - name: Unittest annotate_params
         env:
@@ -161,7 +161,7 @@ jobs:
         run: |
           python3 -m pip install --upgrade pip
           python3 -m pip install requests mock
-          Tools/autotest/unittest/annotate_params_unittest.py
+          python3 Tools/autotest/unittest/annotate_params_unittest.py
 
       - name: Archive buildlog artifacts
         uses: actions/upload-artifact@v5
