@@ -8893,6 +8893,118 @@ class AutoTestCopter(AutoTest):
                                        other_prearm_failures_fatal=False)
         self.context_pop()
         self.reboot_sitl()
+        
+    def RTL_braking_distance(self):
+        '''Measure RTL braking distance to ensure deceleration rates are as expected'''
+        self.context_push()
+        
+        alt = 30
+        start_speed = 10
+        end_speed = 0 # End speed should be 0 as we're travelling away from the home location, so RTL should stop us completely before turning around towards home
+        expected_distance = 32.5 # pre-calculated expected braking distance based on S-curve jerk-limited deceleration parameters and initial speed
+
+        self.set_parameters({
+            'ATC_RATE_P_MAX':30,
+            'ATC_RATE_R_MAX':45,
+            'ATC_ACCEL_P_MAX':5000,
+            'ATC_ACCEL_R_MAX':5000,
+            'WPNAV_SPEED': start_speed * 100,
+            'WPNAV_ACCEL': 250,
+            'RTL_ALT': 3000,
+            'RTL_SPEED': 300,
+            'WPNAV_JERK': 1,
+            'PSC_JERK_XY': 5,
+        })
+
+        self.takeoff(alt_min=alt, mode='GUIDED')
+        
+        start_pos = self.mav.location()
+        
+        self.progress(f"Accelerating to {start_speed} m/s")
+        
+        # Send velocity command repeatedly to maintain speed
+        tstart = self.get_sim_time()
+        timeout = 30
+        while self.get_sim_time_cached() - tstart < timeout:
+            self.mav.mav.set_position_target_local_ned_send(
+                0,  # time_boot_ms
+                1,  # target_system
+                1,  # target_component
+                mavutil.mavlink.MAV_FRAME_LOCAL_NED,
+                0b0000111111000111,  # type_mask (velocity only)
+                0, 0, 0,  # position (ignored)
+                start_speed, 0, 0,  # velocity NED
+                0, 0, 0,  # acceleration (ignored)
+                0, 0  # yaw, yaw_rate (ignored)
+            )
+            
+            # Check current speed
+            m = self.mav.recv_match(type='VFR_HUD', blocking=True, timeout=1)
+            if m:
+                current_speed = m.groundspeed
+                self.progress(f"Current speed: {current_speed:.2f} m/s")
+                
+                if current_speed >= start_speed * 0.95:  # Within 5% of target
+                    self.progress(f"Reached target speed: {current_speed:.2f} m/s")
+                    break
+        
+        # Verify we reached target speed
+        m = self.mav.recv_match(type='VFR_HUD', blocking=True)
+        actual_speed = m.groundspeed
+        if actual_speed < start_speed * 0.9:
+            raise NotAchievedException(
+                f"Failed to reach target speed. Got {actual_speed:.2f} m/s, wanted {start_speed} m/s"
+            )
+
+        # Maintain speed for a moment to stabilize
+        self.delay_sim_time(2)
+
+        # Record position when RTL starts
+        rtl_start_pos = self.mav.location()
+        rtl_start_time = self.get_sim_time()
+
+        self.progress(f"Switching to RTL at {actual_speed:.2f} m/s")
+        self.change_mode('RTL')
+
+        stopped_pos = None
+        max_wait = 60
+        tstart = self.get_sim_time()
+
+        while self.get_sim_time_cached() - tstart < max_wait:
+            m = self.mav.recv_match(type='VFR_HUD', blocking=True, timeout=1)
+            if m and m.groundspeed > (end_speed - 0.5) and m.groundspeed < (end_speed + 0.5):
+                stopped_pos = self.mav.location()
+                stop_time = self.get_sim_time()
+                self.progress(f"Stopped after {stop_time - rtl_start_time:.2f}s to {m.groundspeed:.2f} m/s")
+                break
+            else:
+                self.progress(f"Current speed during RTL: {m.groundspeed:.2f} m/s")
+        
+        if stopped_pos is None:
+            raise NotAchievedException("Failed to detect stopping")
+
+        actual_distance = self.get_distance(rtl_start_pos, stopped_pos)
+        
+        self.progress(f"RTL braking distance: {actual_distance:.2f}m from {actual_speed:.2f} m/s")
+        
+        self.progress(f"Expected braking distance: {expected_distance:.2f}m")
+        self.progress(f"Actual braking distance: {actual_distance:.2f}m")
+        
+        # Allow 15% tolerance for distance
+        tolerance = expected_distance * 0.15
+        
+        if abs(actual_distance - expected_distance) > tolerance:
+            raise NotAchievedException(
+                f"Braking distance outside tolerance: "
+                f"expected={expected_distance:.2f}m, "
+                f"actual={actual_distance:.2f}m, "
+                f"tolerance={tolerance:.2f}m"
+            )
+        
+        self.wait_rtl_complete()
+        self.context_pop()
+        
+        self.progress("RTL braking distance test passed")
 
     def tests1a(self):
         '''return list of all tests'''
@@ -9086,6 +9198,13 @@ class AutoTestCopter(AutoTest):
         ])
         return ret
 
+    def testsMA(self):
+        '''return list of custom MA tests'''
+        ret = ([
+            self.RTL_braking_distance,
+        ])
+        return ret
+
     def tests(self):
         ret = []
         ret.extend(self.tests1a())
@@ -9095,6 +9214,7 @@ class AutoTestCopter(AutoTest):
         ret.extend(self.tests1e())
         ret.extend(self.tests2a())
         ret.extend(self.tests2b())
+        ret.extend(self.testsMA())
         return ret
 
     def disabled_tests(self):
@@ -9146,3 +9266,8 @@ class AutoTestCAN(AutoTestCopter):
 
     def tests(self):
         return self.testcan()
+
+class AutoTestCopterTestsMA(AutoTestCopter):
+
+    def tests(self):
+        return self.testsMA()
