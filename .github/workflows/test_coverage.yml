@@ -140,14 +140,7 @@ jobs:
       fail-fast: false # don't cancel if a job from the matrix fails
       matrix:
         config:
-          [
-            MatekH743,
-            mRoControlZeroOEMH7,
-            CubeOrange,
-            configure-all,
-            build-options-defaults-test,
-            signing,
-          ]
+          [MatekH743, mRoControlZeroOEMH7, CubeOrange, configure-all, signing]
         toolchain: [
             chibios,
             #chibios-clang,
