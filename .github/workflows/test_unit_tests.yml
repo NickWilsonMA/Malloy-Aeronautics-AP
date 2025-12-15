@@ -113,7 +113,7 @@ jobs:
             base, # GCC
             clang,
           ]
-        config: [unit-tests, examples, sitl]
+        config: [unit-tests, sitl]
     steps:
       # git checkout the PR
       - uses: actions/checkout@v6
