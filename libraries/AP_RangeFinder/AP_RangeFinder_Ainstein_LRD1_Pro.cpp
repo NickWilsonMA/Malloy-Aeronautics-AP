@@ -211,7 +211,10 @@ bool AP_RangeFinder_Ainstein_LRD1_Pro::get_reading(float &reading_m)
         {
             reading_m = get_avg_reading(reading_m);
             state.status = RangeFinder::Status::Good;
-            reading_lpf_cm = reading_m*100;
+
+            #if HAL_LOGGING_ENABLED
+              reading_lpf_cm = reading_m*100;
+            #endif
         }
 
         /* Logging Point Start */
