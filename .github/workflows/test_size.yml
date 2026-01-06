@@ -239,20 +239,6 @@ jobs:
 
           echo [`date`] Built PR with no versions
 
-          # build MatekF405 Plane without quadplane
-          if [ "${{matrix.config}}" = "MatekF405" ]; then
-            PLANE_BINARY="build/MatekF405/bin/arduplane.bin"
-            echo "normal size"
-            ls -l "$PLANE_BINARY"
-            EXTRA_HWDEF="/tmp/extra-options.def"
-            echo "define HAL_QUADPLANE_ENABLED 0" >"$EXTRA_HWDEF"
-            ./waf configure --board ${{matrix.config}} --extra-hwdef="$EXTRA_HWDEF"
-            ./waf plane
-            rm "$EXTRA_HWDEF"
-            echo "non-quadplane size:"
-            ls -l "$PLANE_BINARY"
-          fi
-
       - name: Full size compare with base branch
         shell: bash
         run: |
@@ -282,7 +268,7 @@ jobs:
           elif [ $BOOTLOADER -eq 1 ]; then
               EF_BINARY_NAME="AP_Bootloader"
           else
-              EF_BINARY_NAME="arduplane"
+              EF_BINARY_NAME="arducopter"
           fi
           EF_BASE_BRANCH_BINARY="$GITHUB_WORKSPACE/base_branch_bin/$EF_BINARY_NAME"
           EF_PR_BRANCH_BINARY="$GITHUB_WORKSPACE/pr_bin/$EF_BINARY_NAME"
