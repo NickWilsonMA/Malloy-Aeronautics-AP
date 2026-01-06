@@ -46,8 +46,9 @@ build_opts = None
 
 file_path =  os.path.join( ".", fr'logs/MA_autotest.log' )
 
-if not os.path.exists(os.path.dirname(file_path)):
-    os.makedirs(os.path.dirname(file_path))
+# Make folder for logs if it does not already exist
+if not os.path.exists( os.path.dirname( file_path ) ):
+    os.makedirs( os.path.dirname( file_path ) )
 
 logger = logging.getLogger(__name__)
 
