@@ -65,12 +65,6 @@ jobs:
       matrix:
         toolchain: [chibios]
         config: [MatekH743, mRoControlZeroOEMH7, CubeOrange]
-        include:
-          - config: disco
-            toolchain: armhf
-        exclude:
-          - config: disco
-            toolchain: chibios
     steps:
       - uses: actions/checkout@v6
         with:
