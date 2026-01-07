@@ -9,10 +9,14 @@
 
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 #define THISFIRMWARE "MA_COPTER-V4.3.0.12-DEV-I2C"
 =======
 #define THISFIRMWARE "MA_Copter-V4.3.0.11_DEV_RTLACCEL"
 >>>>>>> [NHW] Add RTL_ACCEL param
+=======
+#define THISFIRMWARE "MA_Copter-V4.3.0.12_DEV.2"
+>>>>>>> [NHW] Update version number to reflect multiple Dev changes.
 
 // the following line is parsed by the autotest scripts
 #define FIRMWARE_VERSION 4,3,0,FIRMWARE_VERSION_TYPE_OFFICIAL
