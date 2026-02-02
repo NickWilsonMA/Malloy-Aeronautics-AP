@@ -18,7 +18,6 @@ extern const AP_HAL::HAL& hal;
 AP_Gripper_CAN::AP_Gripper_CAN(struct AP_Gripper::Backend_Config &_config) :
     AP_Gripper_Backend(_config)  // Default board_ID, should be configurable via parameter
 {
-    GCS_SEND_TEXT(MAV_SEVERITY_INFO, "Gripper CAN backend constructor");
     _can_iface = nullptr;
     _can_driver_index = 0;  // CAN peripheral driver 1
     _state_changed = false;
@@ -40,18 +39,13 @@ void AP_Gripper_CAN::init_gripper()
     _can_iface = hal.can[_can_driver_index];
     
     if (_can_iface == nullptr) {
-        GCS_SEND_TEXT(MAV_SEVERITY_INFO, "Gripper_CAN: Failed to get CAN interface %u\n", _can_driver_index);
         return;
     }
     
     // Initialize the CAN interface if not already initialized
     if (!_can_iface->is_initialized()) {
-        GCS_SEND_TEXT(MAV_SEVERITY_INFO, "Gripper_CAN: CAN interface %u not initialized\n", _can_driver_index);
         return;
     }
-    
-    GCS_SEND_TEXT(MAV_SEVERITY_INFO, "Gripper_CAN: Initialized on CAN%u, Msg ID: 0x%03X\n", 
-                       _can_driver_index + 1, _can_msg_id);
 }
 
 // Grab - close the gripper (set to maximum position)
@@ -61,7 +55,6 @@ void AP_Gripper_CAN::grab()
     // Typically, close = high position value
     // First ARM the gripper if not already armed
     if (!_armed) {
-        GCS_SEND_TEXT(MAV_SEVERITY_INFO, "SEND ARM COMMAND");
         send_arm_command(true);
         _armed = true;
     }
@@ -102,7 +95,7 @@ bool AP_Gripper_CAN::valid() const
 // Update gripper - called regularly from main loop
 void AP_Gripper_CAN::update_gripper()
 {
-    // GCS_SEND_TEXT(MAV_SEVERITY_INFO, "Gripper CAN update not implemented yet");
+    // No implementation needed for now
 }
 
 // Build ARM state CAN frame (Message 1: 1 trunk)
@@ -139,12 +132,12 @@ void AP_Gripper_CAN::build_arm_frame(bool arm, AP_HAL::CANFrame& frame)
 
 void print_frame(const AP_HAL::CANFrame& frame)
 {
-    // hal.console->printf("CAN ID: 0x%03X DLC: %u Data:", static_cast<unsigned int>(frame.id), frame.dlc);
+    hal.console->printf("CAN ID: 0x%03X DLC: %u Data:", static_cast<unsigned int>(frame.id), frame.dlc);
     GCS_SEND_TEXT(MAV_SEVERITY_INFO, "CAN ID: %03X DLC: %u Data:", static_cast<unsigned int>(frame.id), frame.dlc);
     for (uint8_t i = 0; i < frame.dlc; i++) {
         GCS_SEND_TEXT(MAV_SEVERITY_INFO, " %02X", frame.data[i]);
     }
-    // hal.console->printf("\n");
+    hal.console->printf("\n");
 }
 
 // Send ARM/DISARM command (Message 1)
@@ -160,8 +153,7 @@ bool AP_Gripper_CAN::send_arm_command(bool arm)
     // Send the frame
     uint64_t timeout = AP_HAL::micros64() + GRIPPER_CAN_TIMEOUT_MS * 1000ULL;
     int16_t res = _can_iface->send(frame, timeout, 0);
-    GCS_SEND_TEXT(MAV_SEVERITY_INFO, "Gripper_CAN: Sent ARM command, arm=%d", arm);
-    
+
     if (res <= 0) {
         hal.console->printf("Gripper_CAN: Failed to send ARM command, res=%d\n", res);
         return false;
@@ -190,7 +182,6 @@ bool AP_Gripper_CAN::send_position_command(uint8_t position)
     int16_t res = _can_iface->send(frame0, timeout, 0);
     
     if (res <= 0) {
-        GCS_SEND_TEXT(MAV_SEVERITY_INFO, "Gripper_CAN: Failed to send position trunk 0, res=%d\n", res);
         return false;
     }
     
@@ -199,7 +190,6 @@ bool AP_Gripper_CAN::send_position_command(uint8_t position)
     res = _can_iface->send(frame1, timeout, 0);
     
     if (res <= 0) {
-        GCS_SEND_TEXT(MAV_SEVERITY_INFO, "Gripper_CAN: Failed to send position trunk 1, res=%d\n", res);
         return false;
     }
     

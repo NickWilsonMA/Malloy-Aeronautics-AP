@@ -26,13 +26,11 @@ public:
 
     // grabbed - returns true if gripper in grabbed state
     bool grabbed() const override {
-        GCS_SEND_TEXT(MAV_SEVERITY_INFO, "Gripper CAN grabbed state not implemented yet");
         return false;
     }
 
     // released - returns true if gripper in released state
     bool released() const override {
-        GCS_SEND_TEXT(MAV_SEVERITY_INFO, "Gripper CAN released state not implemented yet");
         return false;
     }
 
@@ -90,6 +88,7 @@ private:
     uint8_t _sequence_num;
     uint8_t _current_position;
     uint16_t _last_rc_input;
+    uint32_t action_timestamp;
 
     // CAN message ID (0x320 + board ID)
     uint16_t _can_msg_id;
