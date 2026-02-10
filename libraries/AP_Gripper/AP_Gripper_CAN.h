@@ -73,9 +73,6 @@ private:
     // Build ARM state CAN frame (1 trunk)
     void build_arm_frame(bool arm, AP_HAL::CANFrame& frame);
 
-    // Convert RC input to gripper position
-    uint8_t rc_to_position(uint16_t rc_value) ;
-
     // CAN interface for gripper
     AP_HAL::CANIface* _can_iface;
 

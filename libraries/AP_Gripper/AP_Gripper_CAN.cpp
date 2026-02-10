@@ -27,7 +27,7 @@ AP_Gripper_CAN::AP_Gripper_CAN(struct AP_Gripper::Backend_Config &_config) :
     _last_rc_input = RC_MID;
     _armed = false;
     // _board_id = 4;
-    // Calculate CAN message ID
+    // CAN message ID to all boards
     _can_msg_id = 0x320;
 }
 
@@ -61,7 +61,7 @@ void AP_Gripper_CAN::grab()
     
     // Send position command to close gripper
     // Typically, close = high position value
-    if (send_position_command(POS_MAX)) {
+    if (send_position_command(POS_MIN)) {
         _state_changed = true;
         // action_timestamp = AP_HAL::millis();
     }
@@ -79,7 +79,7 @@ void AP_Gripper_CAN::release()
     
     // Send position command to open gripper
     // Typically, open = low position value
-    if (send_position_command(POS_MIN)) {
+    if (send_position_command(POS_MAX)) {
         _state_changed = true;
         // action_timestamp = AP_HAL::millis();
     }
@@ -130,11 +130,13 @@ void AP_Gripper_CAN::build_arm_frame(bool arm, AP_HAL::CANFrame& frame)
     frame.data[7] = 0x00;
 }
 
+// Utility function to print CAN frame (for debugging)
 void print_frame(const AP_HAL::CANFrame& frame)
 {
     hal.console->printf("CAN ID: 0x%03X DLC: %u Data:", static_cast<unsigned int>(frame.id), frame.dlc);
     GCS_SEND_TEXT(MAV_SEVERITY_INFO, "CAN ID: %03X DLC: %u Data:", static_cast<unsigned int>(frame.id), frame.dlc);
     for (uint8_t i = 0; i < frame.dlc; i++) {
+        
         GCS_SEND_TEXT(MAV_SEVERITY_INFO, " %02X", frame.data[i]);
     }
     hal.console->printf("\n");
@@ -174,8 +176,8 @@ bool AP_Gripper_CAN::send_position_command(uint8_t position)
     
     AP_HAL::CANFrame frame0, frame1;
     build_position_frames(position, frame0, frame1);
-    print_frame(frame0);
-    print_frame(frame1);
+    // print_frame(frame0);
+    // print_frame(frame1);
     
     // Send trunk 0
     uint64_t timeout = AP_HAL::micros64() + GRIPPER_CAN_TIMEOUT_MS * 1000ULL;
@@ -260,23 +262,6 @@ void AP_Gripper_CAN::build_position_frames(uint8_t position, AP_HAL::CANFrame& f
     // Bytes 6-7: Reserved (0x0)
     frame1.data[6] = 0x00;
     frame1.data[7] = 0x00;
-}
-
-// Convert RC input (1000-2000) to position command (1-255)
-uint8_t AP_Gripper_CAN::rc_to_position(uint16_t rc_value)
-{
-    // Constrain input
-    rc_value = constrain_int16(rc_value, RC_MIN, RC_MAX);
-    
-    // Map RC range (1000-2000) to position range (1-255)
-    // Linear interpolation
-    // int32_t position = ((int32_t)(rc_value - RC_MIN) * (POS_MAX - POS_MIN)) / (RC_MAX - RC_MIN) + POS_MIN;
-    if( rc_value <= RC_MIN) {
-        return POS_MIN;
-    } else if (rc_value >= RC_MAX) {
-        return POS_MAX;
-    } 
-    return POS_NEUTRAL;
 }
 
 // #endif  // AP_GRIPPER_ENABLED
