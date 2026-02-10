@@ -53,15 +53,11 @@ void AP_Gripper_CAN::grab()
 {
     // Send position command to close gripper
     // Typically, close = high position value
-    // First ARM the gripper if not already armed
-    if (!_armed) {
-        send_arm_command(true);
-        _armed = true;
-    }
+    // ARM the System
+    send_arm_command(true);
     
     // Send position command to close gripper
-    // Typically, close = high position value
-    if (send_position_command(POS_MIN)) {
+    if (send_position_command(POS_MAX)) {
         _state_changed = true;
         // action_timestamp = AP_HAL::millis();
     }
@@ -72,14 +68,11 @@ void AP_Gripper_CAN::grab()
 void AP_Gripper_CAN::release()
 {
     // First ARM the gripper if not already armed
-    if (!_armed) {
-        send_arm_command(true);
-        _armed = true;
-    }
-    
+    send_arm_command(true);
+
     // Send position command to open gripper
     // Typically, open = low position value
-    if (send_position_command(POS_MAX)) {
+    if (send_position_command(POS_MIN)) {
         _state_changed = true;
         // action_timestamp = AP_HAL::millis();
     }
