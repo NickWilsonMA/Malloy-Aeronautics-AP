@@ -332,7 +332,7 @@ bool RangeFinder::_add_backend(AP_RangeFinder_Backend *backend, uint8_t instance
         // we've allocated the same instance twice
         INTERNAL_ERROR(AP_InternalError::error_t::flow_of_control);
     }
-    backend->init_serial(serial_instance);
+    backend->init_serial(instance, serial_instance);
     drivers[instance] = backend;
     num_instances = MAX(num_instances, instance+1);
 

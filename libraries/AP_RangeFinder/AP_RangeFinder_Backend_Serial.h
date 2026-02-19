@@ -9,9 +9,10 @@ public:
     AP_RangeFinder_Backend_Serial(RangeFinder::RangeFinder_State &_state,
                                   AP_RangeFinder_Params &_params);
 
-    void init_serial(uint8_t serial_instance) override;
+    void init_serial(uint8_t instance, uint8_t serial_instance) override;
 
 protected:
+    uint8_t instance;
 
     // baudrate used during object construction:
     virtual uint32_t initial_baudrate(uint8_t serial_instance) const;

@@ -172,6 +172,7 @@ bool AP_RangeFinder_LightWareSerial::get_reading(float &reading_m)
             reading_m = auto_reading_m;
 #if HAL_LOGGING_ENABLED
         Log_LW20_C(
+            instance,
             ldf_reading_m,
             ldl_reading_m,
             auto_reading_m);
@@ -256,12 +257,13 @@ int8_t AP_RangeFinder_LightWareSerial::get_distance_from_lidar_reply(char reply[
     return channel;
 }
 
-void AP_RangeFinder_LightWareSerial::Log_LW20_C(
+void AP_RangeFinder_LightWareSerial::Log_LW20_C(uint8_t rfnd_instance,
     float ldf_m, float ldl_m, float integrated_m)
 {
     const struct log_LW20 pkt = {
         LOG_PACKET_HEADER_INIT(LOG_LW20_MSG),
         time_us : AP_HAL::micros64(),
+        instance : rfnd_instance,
         dist_ldf_m : ldf_m,
         dist_ldl_m : ldl_m,
         dist_int_m : integrated_m,
