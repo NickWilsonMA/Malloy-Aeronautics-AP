@@ -24,10 +24,7 @@ AP_Gripper_CAN::AP_Gripper_CAN(struct AP_Gripper::Backend_Config &_config) :
     _last_send_ms = 0;
     _sequence_num = 0;
     _current_position = 0;
-    _last_rc_input = RC_MID;
     _armed = false;
-    // _board_id = 4;
-    // CAN message ID to all boards
     _can_msg_id = 0x320;
 }
 
@@ -169,6 +166,7 @@ bool AP_Gripper_CAN::send_position_command(uint8_t position)
     
     AP_HAL::CANFrame frame0, frame1;
     build_position_frames(position, frame0, frame1);
+    // Debug Code to print frames before sending
     // print_frame(frame0);
     // print_frame(frame1);
     

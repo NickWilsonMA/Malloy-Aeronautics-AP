@@ -84,7 +84,6 @@ private:
     uint32_t _last_send_ms;
     uint8_t _sequence_num;
     uint8_t _current_position;
-    uint16_t _last_rc_input;
     uint32_t action_timestamp;
 
     // CAN message ID (0x320 + board ID)
@@ -94,11 +93,6 @@ private:
     static constexpr uint8_t POS_MIN = 1;
     static constexpr uint8_t POS_MAX = 255;
     static constexpr uint8_t POS_NEUTRAL = 0;  // 0 = no change
-    
-    // RC input limits
-    static constexpr uint16_t RC_MIN = 1000;
-    static constexpr uint16_t RC_MAX = 2000;
-    static constexpr uint16_t RC_MID = 1500;
 
     bool has_state_can(const uint8_t state) const;
 
