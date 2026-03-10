@@ -56,7 +56,8 @@ void AP_Gripper_CAN::grab()
     // Send position command to close gripper
     if (send_position_command(POS_MAX)) {
         _state_changed = true;
-        // action_timestamp = AP_HAL::millis();
+        // Log the grab event. Please note Drop Mech has reverse logic than Gripper where grab is actually the open dropmech command
+        AP::logger().Write_Event(LogEvent::GRIPPER_GRAB);
     }
     
 }
@@ -71,7 +72,8 @@ void AP_Gripper_CAN::release()
     // Typically, open = low position value
     if (send_position_command(POS_MIN)) {
         _state_changed = true;
-        // action_timestamp = AP_HAL::millis();
+        // Log the release event. Please note Drop Mech has reverse logic than Gripper where release is actually the close dropmech command
+        AP::logger().Write_Event(LogEvent::GRIPPER_RELEASE);
     }
 }
 
