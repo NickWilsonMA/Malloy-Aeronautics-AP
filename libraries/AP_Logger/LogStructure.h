@@ -483,6 +483,7 @@ struct PACKED log_LW20
 {
   LOG_PACKET_HEADER;
   uint64_t time_us;
+  uint8_t instance;
   float dist_ldf_m;  // Distance first from lidar m
   float dist_ldl_m;  // Distance last from lidar m
   float dist_int_m;  // Distance selected as the reading m
@@ -1284,7 +1285,7 @@ LOG_STRUCTURE_FROM_CAMERA \
     { LOG_LRD1_MSG, sizeof(log_LRD1), \
       "LRD1", "QCCCCBBB", "TimeUS,Dis24,Dis60,DisInt,DisLpf,Snr24,Snr60,SnrInt", "smmmm---", "FBBBB---", true }, \
     { LOG_LW20_MSG, sizeof(log_LW20), \
-      "LW20", "Qfff", "TimeUS,DisLdf,DisLdl,DisInt", "smmm", "F000", true }, \
+      "LW20", "QBfff", "TimeUS,Instance,DisLdf,DisLdl,DisInt", "s#mmm", "F-000", true }, \
     { LOG_MAV_STATS, sizeof(log_MAV_Stats), \
       "DMS", "QIIIIBBBBBBBBB",         "TimeUS,N,Dp,RT,RS,Fa,Fmn,Fmx,Pa,Pmn,Pmx,Sa,Smn,Smx", "s-------------", "F-------------" }, \
     LOG_STRUCTURE_FROM_BEACON                                       \

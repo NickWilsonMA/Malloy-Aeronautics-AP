@@ -16,6 +16,7 @@
 #include <AP_HAL/AP_HAL.h>
 #include "AP_RangeFinder_Backend_Serial.h"
 #include <AP_SerialManager/AP_SerialManager.h>
+#include <GCS_MAVLink/GCS.h>
 
 #include <ctype.h>
 
@@ -34,11 +35,13 @@ AP_RangeFinder_Backend_Serial::AP_RangeFinder_Backend_Serial(
 
 }
 
-void AP_RangeFinder_Backend_Serial::init_serial(uint8_t serial_instance)
+void AP_RangeFinder_Backend_Serial::init_serial(uint8_t rfnd_instance, uint8_t serial_instance)
 {
     uart = AP::serialmanager().find_serial(AP_SerialManager::SerialProtocol_Rangefinder, serial_instance);
     if (uart != nullptr) {
         uart->begin(initial_baudrate(serial_instance), rx_bufsize(), tx_bufsize());
+        this->instance = rfnd_instance;
+        GCS_SEND_TEXT(MAV_SEVERITY_INFO, "Rangefinder serial instance %d initialized", rfnd_instance);
     }
 }
 
