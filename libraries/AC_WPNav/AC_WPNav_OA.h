@@ -41,5 +41,7 @@ protected:
     Vector3f    _origin_oabak;          // backup of _origin so it can be restored when oa completes
     Vector3f    _destination_oabak;     // backup of _destination so it can be restored when oa completes
     bool        _terrain_alt_oabak;     // true if backup origin and destination z-axis are terrain altitudes
+    Vector3f    _next_destination_oabak;// backup of _next_destination so it can be restored when oa completes
     Location    _oa_destination;        // intermediate destination during avoidance
+    Location    _oa_next_destination;   // intermediate next destination during avoidance
 };
