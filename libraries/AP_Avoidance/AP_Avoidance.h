@@ -122,6 +122,13 @@ protected:
 
     uint32_t _last_state_change_ms = 0;
     MAV_COLLISION_THREAT_LEVEL _threat_level = MAV_COLLISION_THREAT_LEVEL_NONE;
+    
+    // Abhishek Params
+    // Creating a new variable to track when the threat was cleared, To give time to enforce the recovery action.
+    float _triggered_avoidance_xy;
+
+
+    // End of Abhishek Params
 
     // gcs notification
     // specifies how long we should continue sending messages about a threat after it has cleared
