@@ -159,6 +159,7 @@ void AP_Avoidance::init(void)
     _threat_level = MAV_COLLISION_THREAT_LEVEL_NONE;
     _gcs_cleared_messages_first_sent = std::numeric_limits<uint32_t>::max();
     _current_most_serious_threat = -1;
+    _triggered_avoidance_xy = float(_fail_distance_xy); // Initialise the triggered avoidance distance to the fail distance, so that we start in the correct state.
 }
 
 /*
@@ -343,11 +344,17 @@ void AP_Avoidance::update_threat_level(const Location &my_loc,
 
     const uint32_t obstacle_age = AP_HAL::millis() - obstacle.timestamp_ms;
     float closest_xy = closest_approach_xy(my_loc, my_vel, obstacle_loc, obstacle_vel, _fail_time_horizon + obstacle_age/1000);
-    if (closest_xy < _fail_distance_xy) {
+    
+    // if (closest_xy < _fail_distance_xy) {
+    if(closest_xy < _triggered_avoidance_xy) {
+        GCS_SEND_TEXT(MAV_SEVERITY_INFO, "closest_xy %f _triggered_avoidance_xy %f", closest_xy, float(_triggered_avoidance_xy));
+        _triggered_avoidance_xy = closest_xy; // Set the triggered avoidance distance to the closest approach, so that we don't keep switching between warn and fail actions.
         obstacle.threat_level = MAV_COLLISION_THREAT_LEVEL_HIGH;
-    } else {
+    } else {        
         closest_xy = closest_approach_xy(my_loc, my_vel, obstacle_loc, obstacle_vel, _warn_time_horizon + obstacle_age/1000);
         if (closest_xy < _warn_distance_xy) {
+            GCS_SEND_TEXT(MAV_SEVERITY_INFO, "closest_xy %f _warn_distance_xy %f", closest_xy, float(_warn_distance_xy));
+            _triggered_avoidance_xy = float(_fail_distance_xy); // Set the triggered avoidance distance to the fail distance, so that we don't keep switching between warn and fail actions.
             obstacle.threat_level = MAV_COLLISION_THREAT_LEVEL_LOW;
         }
     }
