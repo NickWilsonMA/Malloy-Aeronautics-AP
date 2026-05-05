@@ -381,7 +381,6 @@ bool AP_OADijkstra::create_exclusion_polygon_with_margin(float margin_cm, AP_OAD
 
     _exclusion_polygon_update_ms = fence->polyfence().get_exclusion_polygon_update_ms();
 
-
     // clear all points
     _exclusion_polygon_numpoints = 0;
 
@@ -397,7 +396,6 @@ bool AP_OADijkstra::create_exclusion_polygon_with_margin(float margin_cm, AP_OAD
         // Note: boundary is "unclosed" meaning the last point is *not* the same as the first
         uint16_t new_points = 0;
         for (uint16_t j = 0; j < num_points; j++) {
-
             // find points before and after current point (relative to current point)
             const uint16_t before_idx = (j == 0) ? num_points-1 : j-1;
             const uint16_t after_idx = (j == num_points-1) ? 0 : j+1;
@@ -421,9 +419,11 @@ bool AP_OADijkstra::create_exclusion_polygon_with_margin(float margin_cm, AP_OAD
 
             // find final point which is outside the original polygon
             Vector2f temp_point = boundary[j] + intermediate_pt;
+
             if (!Polygon_outside(temp_point, boundary, num_points)) {
                 intermediate_pt *= -1;
                 temp_point = boundary[j] + intermediate_pt;
+
                 if (!Polygon_outside(temp_point, boundary, num_points)) {
                     // could not find a point on either side that was outside the exclusion polygon so fail
                     // this may happen if the exclusion polygon has overlapping lines
@@ -433,7 +433,8 @@ bool AP_OADijkstra::create_exclusion_polygon_with_margin(float margin_cm, AP_OAD
             }
 
             // don't add points in corners
-            if (fabsf(intermediate_pt.angle() - before_pt.angle()) < M_PI_2) {
+            const float angle_diff = fabsf(intermediate_pt.angle() - before_pt.angle());
+            if (angle_diff < M_PI_2) {
                 continue;
             }
 
@@ -442,6 +443,7 @@ bool AP_OADijkstra::create_exclusion_polygon_with_margin(float margin_cm, AP_OAD
                 err_id = AP_OADijkstra_Error::DIJKSTRA_ERROR_OUT_OF_MEMORY;
                 return false;
             }
+
             // add point
             _exclusion_polygon_pts[_exclusion_polygon_numpoints + new_points] = temp_point;
             new_points++;
@@ -564,6 +566,66 @@ bool AP_OADijkstra::intersects_fence(const Vector2f &seg_start, const Vector2f &
     const AC_Fence *fence = AC_Fence::get_singleton();
     if (fence == nullptr) {
         return false;
+    }
+
+    // return immediately if current location cannot be fetched
+    struct Location current_loc;
+    if (!AP::ahrs().get_location(current_loc)) {
+        return false;
+    }
+
+    // If we are currently breaching a geofence, then we need to return false from
+    // this function so it can path plan correctly. However, if the path from start
+    // to end breaches an exclusion fence, then we need to return true as the path
+    // does breach a fence and we don't want to go through an exclusion fence.
+    if (fence->polyfence().breached()) {
+      bool intersecting_other_exclusions = false;
+
+        // Check if line segment breaches any exclusion fences, if so return true
+        // But we also need to check if we are exiting an exclusion fence as well,
+        // if we are then we don't need to worry about it, so the flag does not
+        // get updated.
+
+        for (uint8_t i = 0; i < fence->polyfence().get_exclusion_polygon_count(); i++) {
+            uint16_t num_points = 0;
+            const Vector2f* boundary = fence->polyfence().get_exclusion_polygon(i, num_points);
+            if (boundary != nullptr) {
+                Vector2f intersection;
+                if (Polygon_intersects(boundary, num_points, seg_start, seg_end, intersection)) {
+                    Vector3f current_pos_neu;
+                    if (current_loc.get_vector_from_origin_NEU(current_pos_neu) && Polygon_outside(current_pos_neu.xy(), boundary, num_points)) {
+                        // The line segment is intersecting a polygon which we are
+                        // outside of
+                        intersecting_other_exclusions = true;
+                    }
+                }
+            }
+        }
+
+        for (uint8_t i = 0; i < fence->polyfence().get_exclusion_circle_count(); i++) {
+            Vector2f center_pos_cm;
+            float radius;
+            if (fence->polyfence().get_exclusion_circle(i, center_pos_cm, radius)) {
+                // calculate distance between circle's center and segment
+                const float line_seg_dist_cm = Vector2f::closest_distance_between_line_and_point(seg_start, seg_end, center_pos_cm);
+                
+                // intersects if distance is less than radius
+                if (line_seg_dist_cm <= (radius * 100.0f)) {
+                    Vector3f current_pos_neu;
+                    if (current_loc.get_vector_from_origin_NEU(current_pos_neu)) {
+                        const float current_pos_dist_cm = (current_pos_neu.xy() - center_pos_cm).length();
+
+                        if (current_pos_dist_cm > (radius * 100.0f)) {
+                            // We are not inside this exclusion circle but the line
+                            // segment is intersecting
+                            intersecting_other_exclusions = true;
+                        }
+                    }
+                }
+            }
+        }
+
+        return intersecting_other_exclusions;
     }
 
     // determine if segment crosses any of the inclusion polygons

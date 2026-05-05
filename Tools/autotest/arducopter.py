@@ -9099,6 +9099,192 @@ class AutoTestCopter(AutoTest):
 
         self.context_pop()
 
+    def Dijkstra_FenceRecovery_OutsideInclusion(self):
+        '''
+        Test Dijkstra pathfinding from outside inclusion fence to HOME
+        
+        This test verifies that the drone can RTL while outside an inclusion
+        fence with OA enabled.
+        '''
+        self.context_push()
+        
+        # Enable Dijkstra path planning
+        self.set_parameters({
+            'OA_TYPE': 2,  # Dijkstra
+            'OA_MARGIN_MAX': 5,
+            'FENCE_TYPE': 7,
+            'FENCE_ACTION': 1,
+            'WPNAV_SPEED': 500,
+            'RTL_ALT': 1500
+        })
+        
+        # Need to reboot after enabling OA
+        self.reboot_sitl()
+        
+        self.load_fence_by_type(
+            "copter-dijkstra-inclusion-fence.txt",
+            mavutil.mavlink.MAV_CMD_NAV_FENCE_CIRCLE_INCLUSION,
+            circle_radius=20
+        )
+        self.do_fence_enable()
+        self.assert_fence_enabled()
+        
+        self.takeoff(15, mode='ALT_HOLD')
+        
+        self.progress("flying forwards")
+        self.set_rc(2, 1100)
+        
+        # wait for fence to trigger
+        self.wait_mode('RTL', timeout=10)
+        self.wait_statustext("Fence Breached")
+        self.set_rc(2, 1500)
+        
+        self.wait_rtl_complete()
+
+        self.zero_throttle()
+        self.progress("Successfully returned HOME using Dijkstra from outside inclusion")
+
+        self.clear_fence()
+        self.context_pop()
+        self.disarm_vehicle(force=True)
+
+    def Dijkstra_FenceRecovery_InsideExclusion(self):
+        '''
+        Test Dijkstra pathfinding from inside exclusion fence to HOME
+        
+        This test verifies that the drone can RTL while inside an exclusion fence
+        with OA enabled.
+        '''
+        self.context_push()
+        
+        self.clear_fence()
+        
+        # Enable Dijkstra path planning
+        self.set_parameters({
+            'OA_TYPE': 2,  # Dijkstra
+            'OA_MARGIN_MAX': 5,
+            'FENCE_TYPE': 7,
+            'FENCE_ACTION': 1,
+            'WPNAV_SPEED': 500,
+            'RTL_ALT': 1500
+        })
+        
+        # Need to reboot after enabling OA
+        self.reboot_sitl()
+        
+        self.load_fence_by_type(
+            "copter-dijkstra-exclusion-fence.txt",
+            mavutil.mavlink.MAV_CMD_NAV_FENCE_CIRCLE_EXCLUSION,
+            circle_radius=20
+        )
+        self.do_fence_enable()
+        self.assert_fence_enabled()
+
+        self.takeoff(15, mode='ALT_HOLD')
+        
+        self.progress("flying forwards")
+        self.set_rc(2, 1100)
+        
+        # wait for fence to trigger
+        self.wait_mode('RTL', timeout=10)
+        self.wait_statustext("Fence Breached")
+        self.set_rc(2, 1500)
+        
+        self.wait_rtl_complete()
+
+        self.zero_throttle()
+        self.progress("Successfully returned HOME using Dijkstra from inside exclusion")
+
+        self.context_pop()
+        self.clear_fence()
+        self.disarm_vehicle(force=True)
+
+    def Dijkstra_FenceRecovery_PathPlanningReturn(self):
+        '''
+        Test Dijkstra pathfinding through a maze exclusion fence to HOME.
+        
+        This test verifies that the drone can avoid an exclusion fence maze while
+        outside an inclusion fence. A location is setup at the exit of the maze
+        to ensure the aircraft exits correctly.
+        '''
+        self.context_push()
+        
+        self.clear_fence()
+        
+        # Enable Dijkstra path planning
+        self.set_parameters({
+            'OA_TYPE': 2,  # Dijkstra
+            'OA_MARGIN_MAX': 5,
+            'FENCE_TYPE': 7,
+            'FENCE_ACTION': 1,
+            'WPNAV_SPEED': 500,
+            'RTL_ALT': 1500
+        })
+        
+        # Need to reboot after enabling OA
+        self.reboot_sitl()
+        
+        self.load_multiple_fences([
+            {
+                'filename': 'copter-dijkstra-path-planning-exclusion-fence.txt',
+                'fence_type': mavutil.mavlink.MAV_CMD_NAV_FENCE_POLYGON_VERTEX_EXCLUSION,
+            },
+            {
+                'filename': 'copter-dijkstra-path-planning-inclusion-fence.txt',
+                'fence_type': mavutil.mavlink.MAV_CMD_NAV_FENCE_CIRCLE_INCLUSION,
+                'circle_radius': 10,
+            },
+        ])
+
+        # Disable fence so we can travel to desired location
+        self.do_fence_disable()
+        self.assert_fence_disabled()
+
+        self.takeoff(15, mode='GUIDED')
+        
+        starting_loc = mavutil.location(-35.3631079, 149.1642308)
+
+        self.mav.mav.set_position_target_global_int_send(
+            0, # timestamp
+            1, # target system_id
+            1, # target component id
+            mavutil.mavlink.MAV_FRAME_GLOBAL_RELATIVE_ALT_INT, # relative altitude frame
+            MAV_POS_TARGET_TYPE_MASK.POS_ONLY,
+            int(starting_loc.lat * 1e7), # lat
+            int(starting_loc.lng * 1e7), # lon
+            15, # alt
+            0, # vx
+            0, # vy
+            0, # vz
+            0, # afx
+            0, # afy
+            0, # afz
+            0, # yaw
+            0) # yawrate
+        
+        self.wait_location(starting_loc, timeout=60)
+        
+        # Enable fence, we should be outside inclusion so this will trigger RTL
+        self.do_fence_enable()
+        self.assert_fence_enabled()
+
+        # wait for fence to trigger
+        self.wait_statustext("Fence Breached")
+        self.wait_mode('RTL', timeout=10)
+
+        # Should exit the maze and cross through this location
+        end_of_maze_loc = mavutil.location(-35.3633594, 149.1640645)
+        self.wait_location(end_of_maze_loc, accuracy=10, timeout=90)
+        
+        self.wait_rtl_complete()
+
+        self.zero_throttle()
+        self.progress("Successfully returned HOME using Dijkstra by path planning")
+
+        self.context_pop()
+        self.clear_fence()
+        self.disarm_vehicle(force=True)
+
     def tests1a(self):
         '''return list of all tests'''
         ret = super(AutoTestCopter, self).tests()  # about 5 mins and ~20 initial tests from autotest/common.py
@@ -9295,6 +9481,9 @@ class AutoTestCopter(AutoTest):
         '''return list of custom MA tests'''
         ret = ([
             self.RTL_braking_distance,
+            self.Dijkstra_FenceRecovery_OutsideInclusion,
+            self.Dijkstra_FenceRecovery_InsideExclusion,
+            self.Dijkstra_FenceRecovery_PathPlanningReturn,
         ])
         return ret
 
