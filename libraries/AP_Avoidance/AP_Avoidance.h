@@ -125,6 +125,8 @@ protected:
     
     // Abhishek Params
     // Creating a new variable to track when the threat was cleared, To give time to enforce the recovery action.
+    uint32_t _threat_cleared_ms = 0;
+    uint32_t _threat_none_cleared_ms = 0;
     float _triggered_avoidance_xy;
 
 

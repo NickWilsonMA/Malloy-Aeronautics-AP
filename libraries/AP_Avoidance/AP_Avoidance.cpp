@@ -34,7 +34,7 @@ extern const AP_HAL::HAL& hal;
 #include <stdio.h>
 #define debug(fmt, args ...)  do {::fprintf(stderr,"%s:%d: " fmt "\n", __FUNCTION__, __LINE__, ## args); } while(0)
 #else
-#define debug(fmt, args ...)
+#define debug(fmt, args ...) do {GCS_SEND_TEXT(MAV_SEVERITY_INFO, fmt, ## args); } while(0)
 #endif
 
 // table of user settable parameters
@@ -156,6 +156,7 @@ void AP_Avoidance::init(void)
     }
     _obstacle_count = 0;
     _last_state_change_ms = 0;
+    _threat_cleared_ms = 0;
     _threat_level = MAV_COLLISION_THREAT_LEVEL_NONE;
     _gcs_cleared_messages_first_sent = std::numeric_limits<uint32_t>::max();
     _current_most_serious_threat = -1;
@@ -313,7 +314,7 @@ float closest_approach_z(const Location &my_loc,
 {
 
     float delta_vel_d = obstacle_vel[2] - my_vel[2];
-    float delta_pos_d = obstacle_loc.alt - my_loc.alt;
+    float delta_pos_d = (obstacle_loc.alt - my_loc.alt)*0.01f; // convert cm to m
 
     float ret;
     if (delta_pos_d >= 0 && delta_vel_d >= 0) {
@@ -325,11 +326,11 @@ float closest_approach_z(const Location &my_loc,
     }
 
     debug("   time_horizon: (%d)", time_horizon);
-    debug("   delta pos: (%f) metres", delta_pos_d/100.0f);
+    debug("   delta pos: (%f) metres", delta_pos_d);
     debug("   delta vel: (%f) m/s", delta_vel_d);
-    debug("   closest: (%f) metres", ret/100.0f);
+    debug("   closest: (%f) metres", ret);
 
-    return ret/100.0f;
+    return ret;
 }
 
 void AP_Avoidance::update_threat_level(const Location &my_loc,
@@ -339,11 +340,18 @@ void AP_Avoidance::update_threat_level(const Location &my_loc,
 
     Location &obstacle_loc = obstacle._location;
     Vector3f &obstacle_vel = obstacle._velocity;
+    MAV_COLLISION_THREAT_LEVEL current_threat_level = obstacle.threat_level;
+
+    if(current_threat_level != MAV_COLLISION_THREAT_LEVEL_HIGH){
+        _threat_none_cleared_ms =  AP_HAL::millis();
+    }
 
     obstacle.threat_level = MAV_COLLISION_THREAT_LEVEL_NONE;
 
     const uint32_t obstacle_age = AP_HAL::millis() - obstacle.timestamp_ms;
     float closest_xy = closest_approach_xy(my_loc, my_vel, obstacle_loc, obstacle_vel, _fail_time_horizon + obstacle_age/1000);
+    // float closest_xy = closest_approach_xy(my_loc, my_vel, obstacle_loc, obstacle_vel, _fail_time_horizon);
+    
     
     // if (closest_xy < _fail_distance_xy) {
     if(closest_xy < _triggered_avoidance_xy) {
@@ -376,6 +384,14 @@ void AP_Avoidance::update_threat_level(const Location &my_loc,
     // If we haven't heard from a vehicle then assume it is no threat
     if (obstacle_age > MAX_OBSTACLE_AGE_MS) {
         obstacle.threat_level = MAV_COLLISION_THREAT_LEVEL_NONE;
+    }
+
+    if (current_threat_level == MAV_COLLISION_THREAT_LEVEL_HIGH && obstacle.threat_level != MAV_COLLISION_THREAT_LEVEL_HIGH) {
+        if( AP_HAL::millis() - _threat_none_cleared_ms < 20000) { // Only reset the triggered avoidance distance after we've been clear of high threats for at least 1 second, to avoid switching back to fail action if we briefly lose contact with a vehicle we're avoiding.
+            obstacle.threat_level = MAV_COLLISION_THREAT_LEVEL_HIGH;
+        }else{
+            _threat_none_cleared_ms = AP_HAL::millis();
+        }
     }
 
     // could optimise this to not calculate a lot of this if threat
@@ -559,20 +575,41 @@ void AP_Avoidance::handle_avoidance_local(AP_Avoidance::Obstacle *threat)
     uint32_t now = AP_HAL::millis();
 
     if (new_threat_level != _threat_level) {
-        // transition to higher states immediately, recovery to lower states more slowly
-        if (((now - _last_state_change_ms) > AP_AVOIDANCE_STATE_RECOVERY_TIME_MS) || (new_threat_level > _threat_level)) {
-            // handle recovery from high threat level
-            if (_threat_level == MAV_COLLISION_THREAT_LEVEL_HIGH) {
-                handle_recovery(RecoveryAction(_fail_recovery.get()));
-                _latest_action = MAV_COLLISION_ACTION_NONE;
-            }
 
-            // update state
+        if(new_threat_level > _threat_level) {
+            // we have a new or more serious threat, so reset the cleared time
+            _threat_cleared_ms = 0;
             _last_state_change_ms = now;
             _threat_level = new_threat_level;
+        }else{
+            // transition to higher states immediately, recovery to lower states more slowly
+            if (_threat_cleared_ms == 0) {
+                _threat_cleared_ms = now;   // stamp the START of this clearance window
+            }
+            if (((now - _threat_cleared_ms) > AP_AVOIDANCE_STATE_RECOVERY_TIME_MS)) {
+                // GCS_SEND_TEXT(MAV_SEVERITY_INFO, "Threat lvl red %d->%d (%d seconds)", _threat_level, new_threat_level, (now - _threat_cleared_ms)/1000);
+                // GCS_SEND_TEXT(MAV_SEVERITY_INFO, "Threat _threat_cleared_ms (%d) and now (%d) seconds", (_threat_cleared_ms)/1000, (now)/1000);
+                // handle recovery from high threat level
+                if (_threat_level == MAV_COLLISION_THREAT_LEVEL_HIGH) {
+                    handle_recovery(RecoveryAction(_fail_recovery.get()));
+                    _latest_action = MAV_COLLISION_ACTION_NONE;
+                }
+
+                // update state
+                _last_state_change_ms = now;
+                _threat_level = new_threat_level;
+                _threat_cleared_ms = 0;   // reset for the next threat event
+            }
         }
     }
-
+    else {
+        // Threat level UNCHANGED this cycle.
+        if (new_threat_level == MAV_COLLISION_THREAT_LEVEL_HIGH) {
+            // Still actively threatened — keep clearance timer zeroed so
+            // a future dip always starts a fresh countdown.
+            _threat_cleared_ms = 0;
+        }
+    }
     // handle ongoing threat by calling vehicle specific handler
     if ((threat != nullptr) && (_threat_level == MAV_COLLISION_THREAT_LEVEL_HIGH) && (action > MAV_COLLISION_ACTION_REPORT)) {
         _latest_action = handle_avoidance(threat, action);
