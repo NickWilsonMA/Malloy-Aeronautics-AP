@@ -117,8 +117,9 @@ bool AC_WPNav_OA::update_wpnav()
             }
 
             // ensure we stop at next waypoint if the path from destination to next is not clear
+            // only enforced when fast-waypoints option is set; otherwise base WPNav already stops at every wp
             // Note that this check is run on every iteration even if the path planner is not active
-            if (!dest_to_next_dest_clear) {
+            if (!dest_to_next_dest_clear && (oa_ptr->get_options() & AP_OAPathPlanner::OA_OPTION_FAST_WAYPOINTS)) {
                 force_stop_at_next_wp();
             }
             break;
