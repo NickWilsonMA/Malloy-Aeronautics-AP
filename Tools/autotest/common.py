@@ -1838,6 +1838,117 @@ class AutoTest(ABC):
             [
                 locs
             ])
+        
+    def load_fence_by_type(self, filename, fence_type, circle_radius=None):
+        """
+        Function to take in a coords file, fence type and circle radius (optionally)
+        to upload the specified fence to the vehicle
+        """
+        filepath = os.path.join(testdir, self.current_test_name_directory, filename)
+        self.progress("Loading fence from (%s) with type %s" % (str(filepath), fence_type))
+        locs = []
+        for line in open(filepath, 'rb'):
+            if len(line) == 0:
+                continue
+            m = re.match(r"([-\d.]+)\s+([-\d.]+)\s*", line.decode('ascii'))
+            if m is None:
+                raise ValueError("Did not match (%s)" % line)
+            
+            loc = mavutil.location(float(m.group(1)), float(m.group(2)), 0, 0)
+            if fence_type in [mavutil.mavlink.MAV_CMD_NAV_FENCE_CIRCLE_EXCLUSION, mavutil.mavlink.MAV_CMD_NAV_FENCE_CIRCLE_INCLUSION]:
+                if circle_radius is None:
+                    raise ValueError("Circle radius must be specified for circle fences")
+                
+                loc = {"loc": loc, "radius": circle_radius}
+
+            locs.append(loc)
+        
+        if fence_type in [mavutil.mavlink.MAV_CMD_NAV_FENCE_CIRCLE_EXCLUSION, mavutil.mavlink.MAV_CMD_NAV_FENCE_CIRCLE_INCLUSION]:
+            self.upload_fences_from_locations(fence_type, locs)
+        else:
+            self.upload_fences_from_locations(fence_type, [locs])
+
+    def load_multiple_fences(self, fence_definitions, target_system=1, target_component=1):
+        """
+        Load multiple fences with different types in a single upload operation.
+        """
+        seq = 0
+        items = []
+        
+        for fence_def in fence_definitions:
+            filename = fence_def['filename']
+            fence_type = fence_def['fence_type']
+            circle_radius = fence_def.get('circle_radius', None)
+            
+            # Load coordinates from file
+            filepath = os.path.join(testdir, self.current_test_name_directory, filename)
+            self.progress(f"Loading fence from ({filepath}) with type {fence_type}")
+            
+            locs = []
+            for line in open(filepath, 'rb'):
+                if len(line) == 0:
+                    continue
+                m = re.match(r"([-\d.]+)\s+([-\d.]+)\s*", line.decode('ascii'))
+                if m is None:
+                    raise ValueError(f"Did not match ({line})")
+                
+                loc = mavutil.location(float(m.group(1)), float(m.group(2)), 0, 0)
+                
+                # Handle circle fences
+                if fence_type in [mavutil.mavlink.MAV_CMD_NAV_FENCE_CIRCLE_EXCLUSION, 
+                                 mavutil.mavlink.MAV_CMD_NAV_FENCE_CIRCLE_INCLUSION]:
+                    if circle_radius is None:
+                        raise ValueError(f"Circle radius must be specified for circle fence: {filename}")
+                    
+                    # Create mission item for each circle
+                    item = self.mav.mav.mission_item_int_encode(
+                        target_system,
+                        target_component,
+                        seq,
+                        mavutil.mavlink.MAV_FRAME_GLOBAL,
+                        fence_type,
+                        0,  # current
+                        0,  # autocontinue
+                        circle_radius,  # p1 (radius)
+                        0,  # p2
+                        0,  # p3
+                        0,  # p4
+                        int(loc.lat * 1e7),
+                        int(loc.lng * 1e7),
+                        33.0,
+                        mavutil.mavlink.MAV_MISSION_TYPE_FENCE)
+                    seq += 1
+                    items.append(item)
+                else:
+                    locs.append(loc)
+            
+            # Handle polygon fences (batch all vertices together)
+            if fence_type not in [mavutil.mavlink.MAV_CMD_NAV_FENCE_CIRCLE_EXCLUSION,
+                                 mavutil.mavlink.MAV_CMD_NAV_FENCE_CIRCLE_INCLUSION]:
+                count = len(locs)
+                for loc in locs:
+                    item = self.mav.mav.mission_item_int_encode(
+                        target_system,
+                        target_component,
+                        seq,
+                        mavutil.mavlink.MAV_FRAME_GLOBAL,
+                        fence_type,
+                        0,  # current
+                        0,  # autocontinue
+                        count,  # p1 (vertex count)
+                        0,  # p2
+                        0,  # p3
+                        0,  # p4
+                        int(loc.lat * 1e7),
+                        int(loc.lng * 1e7),
+                        33.0,
+                        mavutil.mavlink.MAV_MISSION_TYPE_FENCE)
+                    seq += 1
+                    items.append(item)
+        
+        # Upload all fence items at once
+        self.check_fence_upload_download(items)
+        self.progress(f"Uploaded {len(items)} fence items ({len(fence_definitions)} fences)")
 
     def send_reboot_command(self):
         self.mav.mav.command_long_send(self.sysid_thismav(),
@@ -10250,7 +10361,7 @@ Also, ignores heartbeats not from our target system'''
         for locs in list_of_list_of_locs:
             if type(locs) == dict:
                 # circular fence
-                if vertex_type == mavutil.mavlink.MAV_CMD_NAV_FENCE_POLYGON_VERTEX_EXCLUSION:
+                if vertex_type == mavutil.mavlink.MAV_CMD_NAV_FENCE_CIRCLE_EXCLUSION:
                     v = mavutil.mavlink.MAV_CMD_NAV_FENCE_CIRCLE_EXCLUSION
                 else:
                     v = mavutil.mavlink.MAV_CMD_NAV_FENCE_CIRCLE_INCLUSION
