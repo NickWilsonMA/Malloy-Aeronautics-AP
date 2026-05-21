@@ -1,18 +1,19 @@
 #!/usr/bin/env bash
 # Start (or restart) a firmware SITL validation campaign.
 #
-# Derives the campaign name from:
-#   - ArduCopter/version.h  (e.g. 4.3.0.16 from THISFIRMWARE V4.3.0.16-...)
-#   - current git branch    (e.g. oa-fastWP-fenceEscapeVector)
+# Campaign name comes entirely from ArduCopter/version.h THISFIRMWARE, e.g.:
+#   MA_COPTER-V4.3.0.16-OA-fastWP-fenceEscapeVector
 #
-# Campaign folder + spreadsheet: docs/<version>-<branch>/
+# Creates:
+#   docs/MA_COPTER-V4.3.0.16-OA-fastWP-fenceEscapeVector/
+#   └── MA_COPTER-V4.3.0.16-OA-fastWP-fenceEscapeVector.xlsx  (+ Phase 0 template)
+#
+# Prerequisites:
+#   - Feature branch checked out (suffix must match THISFIRMWARE after the build number)
+#   - THISFIRMWARE build number incremented for this firmware update
 #
 # Usage (from repo root):
-#   git checkout oa-fastWP-fenceEscapeVector    # feature branch under test
-#   # update ArduCopter/version.h first
 #   ./Tools/autotest/reset_firmware_SITL_validation_campaign.sh
-#
-# Optional: --force  allow reset on main/master (not recommended)
 
 set -euo pipefail
 
@@ -33,7 +34,7 @@ for arg in "$@"; do
 done
 
 echo "=== Preparing firmware SITL validation campaign ==="
-echo "Reading: ArduCopter/version.h + git branch"
+echo "Reading THISFIRMWARE from ArduCopter/version.h"
 echo ""
 
 PREPARE_ARGS=()

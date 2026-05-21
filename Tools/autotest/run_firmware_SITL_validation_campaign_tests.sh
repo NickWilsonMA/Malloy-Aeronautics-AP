@@ -74,8 +74,18 @@ else
 fi
 
 echo "=== Logs: ${BUILDLOGS} ==="
+set +e
 ./Tools/autotest/autotest.py "${TARGET}"
+AUTOTEST_RC=$?
+set -e
+
+python3 "${CAMPAIGN_PY}" summarize "${PHASE}" || true
 
 echo ""
-echo "=== Autotest complete ==="
+if [[ "${AUTOTEST_RC}" -eq 0 ]]; then
+    echo "=== Autotest complete (all tests in this run passed) ==="
+else
+    echo "=== Autotest complete (one or more tests failed — see summary above) ==="
+fi
 echo "Next: ./Tools/autotest/generate_firmware_SITL_validation_campaign_artifacts.sh ${PHASE}"
+exit "${AUTOTEST_RC}"

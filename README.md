@@ -1,3 +1,147 @@
+# Malloy Aeronautics — ArduPilot Fork
+
+Custom ArduPilot firmware for Malloy Aeronautics vehicles. This repository tracks Malloy-specific changes on top of upstream ArduPilot **4.3.0**. The integration branch is **`MA-4.3.0.X`** (not upstream `master`).
+
+**Repository:** [github.com/Malloy-Aeronautics/Malloy-Aeronautics-AP](https://github.com/Malloy-Aeronautics/Malloy-Aeronautics-AP)
+
+### What we changed (high level)
+
+- **Obstacle avoidance (OA) / Dijkstra path planner** — fence-aware routing for AUTO, GUIDED, and RTL.
+- **OA fast waypoints** — smoother mission legs through Dijkstra path points when enabled.
+- **Fence breach escape vector** — shortest escape from exclusion breach, automatic RTL hand-off, repeated breach cycles (see branch `OA-fastWP-fenceEscapeVector`).
+- **SITL validation harness** — phased unattended autotests (Phase 0 firmware regression → feature phases) with spreadsheet, HTML/RTF reports, and visual evidence under `docs/`.
+
+Upstream ArduPilot documentation still applies for general build/dev topics: [ardupilot.org/dev](https://ardupilot.org/dev/).
+
+---
+
+## Firmware update workflow
+
+Every feature firmware update follows the same process. Example: **`OA-fastWP-fenceEscapeVector`** with `THISFIRMWARE` **`MA_COPTER-V4.3.0.16-OA-fastWP-fenceEscapeVector`**.
+
+### 1. Create a feature branch
+
+On GitHub (or locally):
+
+1. Go to **Branches → New branch**
+2. **Source branch:** `MA-4.3.0.X`
+3. **Branch name:** short feature name, e.g. `OA-fastWP-fenceEscapeVector` (must match the suffix you will use in `version.h`)
+
+```bash
+git fetch origin
+git checkout -b OA-fastWP-fenceEscapeVector origin/MA-4.3.0.X
+```
+
+### 2. Bump `ArduCopter/version.h` (first commit on the branch)
+
+Edit `THISFIRMWARE` **before** starting code changes. Format:
+
+```c
+#define THISFIRMWARE "MA_COPTER-V4.3.0.16-OA-fastWP-fenceEscapeVector"
+```
+
+- Increment the **build number** (`.16`, `.17`, …) for each new firmware update.
+- The part **after** the build number must **exactly match** the git branch name.
+
+Validate:
+
+```bash
+python3 Tools/autotest/firmware_SITL_validation_campaign.py validate
+```
+
+### 3. Develop firmware changes
+
+Implement and review code on the feature branch as usual.
+
+### 4. Start the SITL validation campaign
+
+When ready to test, reset the campaign template (reads `THISFIRMWARE`, creates `docs/` tree + spreadsheet):
+
+```bash
+./Tools/autotest/reset_firmware_SITL_validation_campaign.sh
+```
+
+Creates:
+
+```
+docs/MA_COPTER-V4.3.0.16-OA-fastWP-fenceEscapeVector/
+├── MA_COPTER-V4.3.0.16-OA-fastWP-fenceEscapeVector.xlsx   # Intro + Phase 0 tab
+├── README.txt
+└── phase0/{logs,visual_evidence,report}/
+```
+
+### 5. Run Phase 0 autotests (firmware regression)
+
+```bash
+./Tools/autotest/run_firmware_SITL_validation_campaign_tests.sh 0
+```
+
+- Builds ArduCopter SITL (first run), runs P0-01..P0-22
+- Logs → `phase0/logs/` (`.txt`, `.tlog`, `.BIN`)
+- Prints **PASS/FAIL** per test and **re-run commands** for failures
+
+Re-run a single failed test:
+
+```bash
+./Tools/autotest/run_firmware_SITL_validation_campaign_tests.sh 0 P0_07_Landing --skip-build
+```
+
+### 6. Generate reports and visual evidence
+
+After a test run (full or partial), generate artifacts:
+
+```bash
+./Tools/autotest/generate_firmware_SITL_validation_campaign_artifacts.sh 0
+```
+
+- Updates spreadsheet columns E–F (Pass/Fail, log ref)
+- Creates **timestamped** folders under `phase0/visual_evidence/` and `phase0/report/`
+- `latest/` symlink → newest run (re-running individual tests then re-generating creates a **new** timestamp folder so a second trial is visible)
+- Phase 0: RTF + HTML firmware regression report + visual dashboard
+
+Open:
+
+- `docs/<THISFIRMWARE>/phase0/visual_evidence/latest/index.html`
+- `docs/<THISFIRMWARE>/phase0/report/latest/`
+
+Repeat **run → fix → re-run → generate artifacts** until Phase 0 is all PASS.
+
+### 7. Later phases (feature-specific)
+
+When Phase 0 passes:
+
+```bash
+./Tools/autotest/add_firmware_SITL_validation_phase.sh 1   # fence regression SITL-01..23
+./Tools/autotest/run_firmware_SITL_validation_campaign_tests.sh 1
+./Tools/autotest/generate_firmware_SITL_validation_campaign_artifacts.sh 1
+```
+
+Same pattern for phases 2 and 3 (fast-WP integration, breach escape).
+
+### 8. Pull request to `MA-4.3.0.X`
+
+When all required phases pass:
+
+1. Push the feature branch
+2. Open a PR **into `MA-4.3.0.X`**
+3. In the PR description include:
+   - `THISFIRMWARE` string and summary of changes
+   - Link to `docs/<THISFIRMWARE>/` evidence (spreadsheet, Phase 0 report, dashboards)
+   - Pass/fail summary per phase
+4. Wait for review and merge
+
+### Command cheat sheet
+
+| Step | Command |
+|------|---------|
+| Validate version + branch | `python3 Tools/autotest/firmware_SITL_validation_campaign.py validate` |
+| Init campaign template | `./Tools/autotest/reset_firmware_SITL_validation_campaign.sh` |
+| Run autotests | `./Tools/autotest/run_firmware_SITL_validation_campaign_tests.sh <0\|1\|2\|3> [TestName] [--skip-build]` |
+| Reports + spreadsheet | `./Tools/autotest/generate_firmware_SITL_validation_campaign_artifacts.sh <phase>` |
+| Add phase worksheet | `./Tools/autotest/add_firmware_SITL_validation_phase.sh <1\|2\|3>` |
+
+---
+
 # ArduPilot Project
 
 <a href="https://ardupilot.org/discord"><img src="https://img.shields.io/discord/674039678562861068.svg" alt="Discord">

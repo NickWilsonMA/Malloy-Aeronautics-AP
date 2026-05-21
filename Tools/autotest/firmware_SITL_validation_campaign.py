@@ -7,6 +7,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 from datetime import datetime
 
 # Workbook cover / campaign intro (Phase 0 is generic firmware regression on every update).
@@ -24,11 +25,15 @@ ADD_PHASE_SCRIPT = './Tools/autotest/add_firmware_SITL_validation_phase.sh'
 PHASE_SUBDIRS = ('logs', 'visual_evidence', 'report')
 
 _CONFIG_FILENAME = 'firmware_SITL_validation_campaign_config.json'
-_DEFAULT_BRANCHES = frozenset(['main', 'master', 'develop', 'devel', 'trunk'])
+_DEFAULT_BRANCHES = frozenset(['main', 'master', 'develop', 'devel', 'trunk', 'MA-4.3.0.X'])
+_THISFIRMWARE_RE = re.compile(
+    r'^MA_COPTER-V(\d+\.\d+\.\d+\.\d+)-(.+)$',
+)
 
 # Populated from config written by reset_firmware_SITL_validation_campaign.sh
 CAMPAIGN_ID = None
 FIRMWARE_VERSION = None
+THISFIRMWARE = None
 CAMPAIGN_FEATURE = None
 GIT_BRANCH = None
 
@@ -45,37 +50,40 @@ def _version_h_path():
     return os.path.join(_repo_root(), 'ArduCopter', 'version.h')
 
 
-def parse_arducopter_firmware_version(version_h_path=None):
-    '''Parse firmware version string from ArduCopter/version.h (THISFIRMWARE or FW_*).'''
+def _quote_strip(value):
+    return value.strip().strip('"').strip('\u201c').strip('\u201d').strip()
+
+
+def parse_thisfirmware(version_h_path=None):
+    '''
+    Parse ArduCopter/version.h THISFIRMWARE, e.g.
+    MA_COPTER-V4.3.0.16-OA-fastWP-fenceEscapeVector
+    '''
     version_h_path = version_h_path or _version_h_path()
     with open(version_h_path, 'r', encoding='utf-8') as f:
         content = f.read()
 
-    # THISFIRMWARE line may use straight or Unicode quotes, e.g.
-    # MA_COPTER-V4.3.0.16-DEV-OAfastWP
     line_m = re.search(r'#define\s+THISFIRMWARE\s+(.+)$', content, re.MULTILINE)
-    if line_m:
-        line = line_m.group(1)
-        for pattern in (
-            r'V(\d+\.\d+\.\d+\.\d+)',  # 4-part Malloy build (preferred)
-            r'V(\d+\.\d+\.\d+)',
-            r'V(\d+\.\d+)',
-        ):
-            m = re.search(pattern, line)
-            if m:
-                return m.group(1)
+    if not line_m:
+        return None
 
-    major = _macro_int(content, 'FW_MAJOR')
-    minor = _macro_int(content, 'FW_MINOR')
-    patch = _macro_int(content, 'FW_PATCH')
-    if major is not None and minor is not None and patch is not None:
-        return '%d.%d.%d' % (major, minor, patch)
-    return None
+    full_name = _quote_strip(line_m.group(1))
+    m = _THISFIRMWARE_RE.match(full_name)
+    if not m:
+        return None
+
+    return {
+        'thisfirmware': full_name,
+        'campaign_id': full_name,
+        'firmware_version': m.group(1),
+        'branch_suffix': m.group(2),
+    }
 
 
-def _macro_int(content, name):
-    m = re.search(r'#define\s+%s\s+(\d+)' % re.escape(name), content)
-    return int(m.group(1)) if m else None
+def parse_arducopter_firmware_version(version_h_path=None):
+    '''Return dotted build number (e.g. 4.3.0.16) from THISFIRMWARE.'''
+    info = parse_thisfirmware(version_h_path)
+    return info['firmware_version'] if info else None
 
 
 def get_git_branch():
@@ -93,30 +101,19 @@ def get_git_branch():
     return out
 
 
-def sanitize_branch_for_campaign_id(branch):
-    branch = branch.strip().replace('/', '-')
-    branch = re.sub(r'[^\w.\-]+', '-', branch)
-    branch = re.sub(r'-+', '-', branch).strip('-')
-    return branch
-
-
-def build_campaign_id(firmware_version, branch):
-    return '%s-%s' % (firmware_version, sanitize_branch_for_campaign_id(branch))
-
-
 def validate_repo_for_campaign(strict_branch=True):
     errors = []
     version_h = _version_h_path()
-    firmware_version = None
+    info = None
 
     if not os.path.isfile(version_h):
         errors.append('ArduCopter/version.h not found at %s.' % version_h)
     else:
-        firmware_version = parse_arducopter_firmware_version(version_h)
-        if not firmware_version:
+        info = parse_thisfirmware(version_h)
+        if not info:
             errors.append(
-                'Could not parse firmware version from ArduCopter/version.h. '
-                'Set THISFIRMWARE (e.g. MA_COPTER-V4.3.0.16-...) or FW_MAJOR/MINOR/PATCH.',
+                'THISFIRMWARE must match MA_COPTER-V<major>.<minor>.<patch>.<build>-<branch-name> '
+                '(example: MA_COPTER-V4.3.0.16-OA-fastWP-fenceEscapeVector).',
             )
 
     branch = get_git_branch()
@@ -127,18 +124,25 @@ def validate_repo_for_campaign(strict_branch=True):
         )
     elif strict_branch and branch in _DEFAULT_BRANCHES:
         errors.append(
-            'Currently on default branch "%s". '
-            'Check out the feature branch under test: git checkout <branch>' % branch,
+            'Currently on integration/default branch "%s". '
+            'Create a feature branch from MA-4.3.0.X and check it out.' % branch,
+        )
+    elif info and branch and branch != info['branch_suffix']:
+        errors.append(
+            'Git branch "%s" does not match THISFIRMWARE suffix "%s". '
+            'Either rename the branch or update ArduCopter/version.h so both match.'
+            % (branch, info['branch_suffix']),
         )
 
-    return firmware_version, branch, errors
+    return info, branch, errors
 
 
-def write_campaign_config(firmware_version, branch):
-    campaign_id = build_campaign_id(firmware_version, branch)
+def write_campaign_config(info, branch):
     data = {
-        'campaign_id': campaign_id,
-        'firmware_version': firmware_version,
+        'campaign_id': info['campaign_id'],
+        'thisfirmware': info['thisfirmware'],
+        'firmware_version': info['firmware_version'],
+        'branch_suffix': info['branch_suffix'],
         'git_branch': branch,
         'version_h': os.path.relpath(_version_h_path(), _repo_root()),
         'prepared_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
@@ -161,27 +165,29 @@ def load_campaign_config(require=True):
 
 
 def _apply_config(cfg):
-    global CAMPAIGN_ID, FIRMWARE_VERSION, CAMPAIGN_FEATURE, GIT_BRANCH
+    global CAMPAIGN_ID, FIRMWARE_VERSION, THISFIRMWARE, CAMPAIGN_FEATURE, GIT_BRANCH
     if not cfg:
         CAMPAIGN_ID = None
         FIRMWARE_VERSION = None
+        THISFIRMWARE = None
         CAMPAIGN_FEATURE = None
         GIT_BRANCH = None
         return
     CAMPAIGN_ID = cfg['campaign_id']
     FIRMWARE_VERSION = cfg['firmware_version']
+    THISFIRMWARE = cfg.get('thisfirmware', cfg['campaign_id'])
     GIT_BRANCH = cfg.get('git_branch', '')
-    CAMPAIGN_FEATURE = GIT_BRANCH
+    CAMPAIGN_FEATURE = cfg.get('branch_suffix', GIT_BRANCH)
 
 
 def _campaign_not_initialized_message():
-    print('Firmware SITL validation campaign is not initialized.', file=__import__('sys').stderr)
-    print('', file=__import__('sys').stderr)
-    print('From repo root, run:', file=__import__('sys').stderr)
-    print('  %s' % RESET_SCRIPT, file=__import__('sys').stderr)
-    print('', file=__import__('sys').stderr)
-    print('That script reads ArduCopter/version.h and the current git branch, then creates', file=__import__('sys').stderr)
-    print('docs/<version>-<branch>/ with the spreadsheet template.', file=__import__('sys').stderr)
+    print('Firmware SITL validation campaign is not initialized.', file=sys.stderr)
+    print('', file=sys.stderr)
+    print('From repo root, run:', file=sys.stderr)
+    print('  %s' % RESET_SCRIPT, file=sys.stderr)
+    print('', file=sys.stderr)
+    print('That script reads THISFIRMWARE from ArduCopter/version.h and creates', file=sys.stderr)
+    print('docs/<THISFIRMWARE>/ with the Phase 0 spreadsheet template.', file=sys.stderr)
 
 
 def require_campaign_config():
@@ -192,23 +198,88 @@ def require_campaign_config():
 
 
 def prepare_campaign_from_repo(force=False):
-    firmware_version, branch, errors = validate_repo_for_campaign(strict_branch=not force)
+    info, branch, errors = validate_repo_for_campaign(strict_branch=not force)
     if errors:
-        print('Cannot prepare firmware SITL validation campaign:', file=__import__('sys').stderr)
+        print('Cannot prepare firmware SITL validation campaign:', file=sys.stderr)
         for err in errors:
-            print('  - %s' % err, file=__import__('sys').stderr)
-        print('', file=__import__('sys').stderr)
-        print('Before running %s:' % RESET_SCRIPT, file=__import__('sys').stderr)
-        print('  1. Check out the feature branch under test (git checkout <branch>).', file=__import__('sys').stderr)
-        print('  2. Update ArduCopter/version.h (THISFIRMWARE / FW_* version).', file=__import__('sys').stderr)
+            print('  - %s' % err, file=sys.stderr)
+        print('', file=sys.stderr)
+        print('Before running %s:' % RESET_SCRIPT, file=sys.stderr)
+        print('  1. Create/check out feature branch from MA-4.3.0.X (branch name = feature name).', file=sys.stderr)
+        print('  2. Set ArduCopter/version.h THISFIRMWARE to:', file=sys.stderr)
+        print('       MA_COPTER-V<next-build>-<branch-name>', file=sys.stderr)
+        print('     Increment the build number (.16, .17, ...) and match the branch suffix.', file=sys.stderr)
         return 1
 
-    cfg = write_campaign_config(firmware_version, branch)
-    print('Campaign ID:      %s' % cfg['campaign_id'])
-    print('Firmware version: %s  (from %s)' % (cfg['firmware_version'], cfg['version_h']))
+    cfg = write_campaign_config(info, branch)
+    print('THISFIRMWARE:     %s' % cfg['thisfirmware'])
+    print('Campaign folder:  docs/%s/' % cfg['campaign_id'])
     print('Git branch:       %s' % cfg['git_branch'])
-    print('Evidence folder:  docs/%s/' % cfg['campaign_id'])
+    print('Build version:    %s' % cfg['firmware_version'])
     return 0
+
+
+def _phase_tests(phase):
+    import generate_oafastwp_visual_evidence as visual
+    return {
+        0: visual.PHASE0_TESTS,
+        1: visual.PHASE1_TESTS,
+        2: visual.PHASE2_TESTS,
+        3: visual.PHASE3_TESTS,
+    }[int(phase)]
+
+
+def summarize_phase_logs(phase):
+    '''Print pass/fail summary and per-test re-run commands after an autotest run.'''
+    phase = int(phase)
+    buildlogs = phase_buildlogs(phase)
+    tests = _phase_tests(phase)
+
+    import generate_oafastwp_visual_evidence as visual
+    results = visual.collect_results(buildlogs, tests)
+
+    passed = [r for r in results if r['passed']]
+    failed = [r for r in results if not r['passed']]
+    missing = [r for r in results if not r.get('txt_path')]
+
+    print('')
+    print('=== Phase %d autotest summary ===' % phase)
+    print('Logs: %s' % buildlogs)
+    print('Result: %d/%d PASS' % (len(passed), len(results)))
+
+    for r in results:
+        if not r.get('txt_path'):
+            status = 'MISSING'
+        elif r['passed']:
+            status = 'PASS'
+        else:
+            status = 'FAIL'
+        log_name = os.path.basename(r['txt_path']) if r.get('txt_path') else '(no log yet)'
+        print('  [%s] %s  %s  %s' % (status, r['sitl_ids'][0], r['name'], log_name))
+
+    if failed or missing:
+        print('')
+        print('Re-run individually (--skip-build after first build):')
+        seen = set()
+        for r in failed + missing:
+            tid = r['sitl_ids'][0]
+            if tid in seen:
+                continue
+            seen.add(tid)
+            print('  %s %d %s --skip-build' % (RUN_TESTS_SCRIPT, phase, r['name']))
+        print('')
+        print('Then refresh reports/spreadsheet:')
+        print('  %s %d' % (GENERATE_ARTIFACTS_SCRIPT, phase))
+    else:
+        print('')
+        print('All tests PASS. Generate evidence + spreadsheet:')
+        print('  %s %d' % (GENERATE_ARTIFACTS_SCRIPT, phase))
+        if phase == 0:
+            print('')
+            print('Phase 0 sign-off complete. Add Phase 1 tab when ready:')
+            print('  %s 1' % ADD_PHASE_SCRIPT)
+
+    return 0 if not failed and not missing else 1
 
 
 def campaign_root():
@@ -265,10 +336,12 @@ _apply_config(load_campaign_config(require=False))
 
 
 if __name__ == '__main__':
-    import sys
     if len(sys.argv) > 1 and sys.argv[1] == 'prepare':
         force = '--force' in sys.argv[2:]
         sys.exit(prepare_campaign_from_repo(force=force))
+    elif len(sys.argv) > 1 and sys.argv[1] == 'summarize':
+        phase = int(sys.argv[2]) if len(sys.argv) > 2 else 0
+        sys.exit(summarize_phase_logs(phase))
     elif len(sys.argv) > 1 and sys.argv[1] == 'buildlogs':
         phase = int(sys.argv[2]) if len(sys.argv) > 2 else 0
         print(phase_buildlogs(phase))
@@ -279,15 +352,12 @@ if __name__ == '__main__':
     elif len(sys.argv) > 1 and sys.argv[1] == 'campaign_id':
         print(require_campaign_config()['campaign_id'])
     elif len(sys.argv) > 1 and sys.argv[1] == 'validate':
-        _, _, errors = validate_repo_for_campaign()
+        info, branch, errors = validate_repo_for_campaign()
         if errors:
             for err in errors:
                 print(err, file=sys.stderr)
             sys.exit(1)
-        fw = parse_arducopter_firmware_version()
-        branch = get_git_branch()
-        print('OK  firmware=%s  branch=%s  campaign=%s' % (
-            fw, branch, build_campaign_id(fw, branch)))
+        print('OK  THISFIRMWARE=%s  branch=%s' % (info['thisfirmware'], branch))
         sys.exit(0)
     else:
         cfg = load_campaign_config(require=False)

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Create docs/<version>-<branch>/ layout + template spreadsheet (Intro + Phase 0 tab).
+# Create docs/<THISFIRMWARE>/ layout + template spreadsheet (Intro + Phase 0 tab).
 # Normally invoked by reset_firmware_SITL_validation_campaign.sh.
 #
 # Usage (from repo root):
@@ -29,19 +29,18 @@ python3 "${SCRIPT_DIR}/oafastwp_spreadsheet_data.py"
 cat > "${ROOT}/README.txt" << EOF
 Firmware SITL validation campaign — ${CAMPAIGN_ID}
 
-Derived from ArduCopter/version.h + git branch when reset was run.
+Name source: ArduCopter/version.h THISFIRMWARE (must match checked-out git branch suffix).
 
-New firmware upgrade:
-  1. Check out feature branch + update ArduCopter/version.h
-  2. ./Tools/autotest/reset_firmware_SITL_validation_campaign.sh
-
-Workflow (each phase):
+Workflow:
   1. Run autotests:   ./Tools/autotest/run_firmware_SITL_validation_campaign_tests.sh <phase> [TestName] [--skip-build]
-  2. Add phase tab:   ./Tools/autotest/add_firmware_SITL_validation_phase.sh <1|2|3>   (when ready)
-  3. Artifacts:       ./Tools/autotest/generate_firmware_SITL_validation_campaign_artifacts.sh <phase>
+  2. Generate report: ./Tools/autotest/generate_firmware_SITL_validation_campaign_artifacts.sh <phase>
+  3. Add phase tab:   ./Tools/autotest/add_firmware_SITL_validation_phase.sh <1|2|3>   (when ready)
+
+Each report/artifacts run creates a new timestamped folder under phase<N>/report/ and
+phase<N>/visual_evidence/ (latest/ symlink always points at the newest run).
 
 Layout:
-  phase<N>/logs/              autotest output (.txt, .tlog, .BIN)
+  phase<N>/logs/              autotest .txt / .tlog / .BIN
   phase<N>/visual_evidence/   HTML dashboard + PNG cards
   phase0/report/            firmware regression RTF + HTML (Firmware_Regression_Report.rtf)
   $(basename "${XLSX}")       spreadsheet (Intro + phase tabs)

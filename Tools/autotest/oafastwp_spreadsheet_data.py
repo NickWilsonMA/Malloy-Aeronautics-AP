@@ -271,8 +271,8 @@ def _write_intro_sheet(wb, active_phases):
 
     ws.merge_cells('A2:I2')
     ws['A2'] = (
-        'Firmware %s  |  Branch: %s  |  Campaign folder: docs/%s/'
-        % (FIRMWARE_VERSION, campaign.GIT_BRANCH or campaign.CAMPAIGN_FEATURE, campaign.CAMPAIGN_ID)
+        'THISFIRMWARE: %s  |  Branch: %s  |  docs/%s/'
+        % (campaign.THISFIRMWARE or campaign.CAMPAIGN_ID, campaign.GIT_BRANCH, campaign.CAMPAIGN_ID)
     )
     ws['A2'].font = subtitle_font
     ws['A2'].alignment = wrap
@@ -341,7 +341,7 @@ def _write_intro_sheet(wb, active_phases):
     row += 1
     ws.merge_cells('A%d:I%d' % (row, row))
     ws.cell(row, 1, (
-        '0. New firmware:         check out branch + update ArduCopter/version.h, then %s\n'
+        '0. New firmware:         update THISFIRMWARE in ArduCopter/version.h, then %s\n'
         '1. Run autotests:        %s <phase>\n'
         '2. Generate artifacts:   %s <phase>\n'
         'Add later phases:        %s <1|2|3>'
