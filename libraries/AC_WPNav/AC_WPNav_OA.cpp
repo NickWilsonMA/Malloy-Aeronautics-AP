@@ -61,7 +61,25 @@ int32_t AC_WPNav_OA::get_wp_bearing_to_destination() const
 /// true when we have come within RADIUS cm of the waypoint
 bool AC_WPNav_OA::reached_wp_destination() const
 {
-    return (_oa_state == AP_OAPathPlanner::OA_NOT_REQUIRED) && AC_WPNav::reached_wp_destination();
+    // standard behaviour: only allow the caller to advance once OA has finished and the underlying
+    // WP controller reports the target reached.
+    if (_oa_state == AP_OAPathPlanner::OA_NOT_REQUIRED) {
+        return AC_WPNav::reached_wp_destination();
+    }
+
+    // breach-escape special case: Dijkstra has delivered the escape vector, the vehicle has
+    // physically reached the safe stand-off, but the mode-supplied destination (e.g. RTL's
+    // INITIAL_CLIMB target, which is set to the breach location and therefore sits inside the
+    // exclusion fence) cannot be reached in strict mode.  If we keep reporting "not reached" here
+    // the calling mode never advances to its next phase (RETURN_HOME has a different, reachable
+    // target), so RTL stalls at the stand-off forever.  Mirroring what happens when the operator
+    // manually toggles RTL: treat the stand-off as the reached point and let the mode advance.
+    AP_OAPathPlanner *oa_ptr = AP_OAPathPlanner::get_singleton();
+    if (oa_ptr != nullptr && oa_ptr->breach_escape_holding()) {
+        return AC_WPNav::reached_wp_destination();
+    }
+
+    return false;
 }
 
 /// update_wpnav - run the wp controller - should be called at 100hz or higher

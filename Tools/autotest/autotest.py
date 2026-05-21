@@ -328,6 +328,10 @@ __bin_names = {
     "CopterTests2b": "arducopter",
     
     "CopterTestsMA": "arducopter",
+    "CopterTestsOAfastWPPhase0": "arducopter",
+    "CopterTestsOAfastWPPhase1": "arducopter",
+    "CopterTestsOAfastWPPhase2": "arducopter",
+    "CopterTestsOAfastWPPhase3": "arducopter",
 
     "Plane": "arduplane",
     "Rover": "ardurover",
@@ -402,6 +406,10 @@ tester_class_map = {
     "test.CopterTests2a": arducopter.AutoTestCopterTests2a, # 8m23s
     "test.CopterTests2b": arducopter.AutoTestCopterTests2b, # 8m18s
     "test.CopterTestsMA": arducopter.AutoTestCopterTestsMA,
+    "test.CopterTestsOAfastWPPhase0": arducopter.AutoTestCopterTestsOAfastWPPhase0,
+    "test.CopterTestsOAfastWPPhase1": arducopter.AutoTestCopterTestsOAfastWPPhase1,
+    "test.CopterTestsOAfastWPPhase2": arducopter.AutoTestCopterTestsOAfastWPPhase2,
+    "test.CopterTestsOAfastWPPhase3": arducopter.AutoTestCopterTestsOAfastWPPhase3,
     "test.Plane": arduplane.AutoTestPlane,
     "test.QuadPlane": quadplane.AutoTestQuadPlane,
     "test.Rover": rover.AutoTestRover,
@@ -1142,6 +1150,10 @@ if __name__ == "__main__":
         'test.CopterTests2b',
 
         'test.CopterTestsMA',
+        'test.CopterTestsOAfastWPPhase0',
+        'test.CopterTestsOAfastWPPhase1',
+        'test.CopterTestsOAfastWPPhase2',
+        'test.CopterTestsOAfastWPPhase3',
 
         'clang-scan-build',
     ]
@@ -1180,6 +1192,10 @@ if __name__ == "__main__":
         "fly.ArduCopterTests2b": "test.CopterTests2b",
         
         "fly.ArduCopterTestsMA": "test.CopterTestsMA",
+        "fly.ArduCopterTestsOAfastWPPhase0": "test.CopterTestsOAfastWPPhase0",
+        "fly.ArduCopterTestsOAfastWPPhase1": "test.CopterTestsOAfastWPPhase1",
+        "fly.ArduCopterTestsOAfastWPPhase2": "test.CopterTestsOAfastWPPhase2",
+        "fly.ArduCopterTestsOAfastWPPhase3": "test.CopterTestsOAfastWPPhase3",
     }
 
     # form up a list of bits NOT to run, mapping from old step names

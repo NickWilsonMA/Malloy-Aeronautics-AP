@@ -22,6 +22,13 @@ public:
     // trigger Dijkstra's to recalculate shortest path based on current location 
     void recalculate_path() { _shortest_path_ok = false; }
 
+    // true while the breach-escape vector has been delivered, the vehicle has reached the safe
+    // stand-off point, and strict-mode replan toward the current destination is failing (i.e. the
+    // destination is unreachable from the stand-off in strict mode, typically because the RTL/mode
+    // destination is inside the exclusion fence we just escaped).  WPNav_OA polls this so it can
+    // report reached_wp_destination() and let the calling mode advance past the unreachable target.
+    bool breach_escape_holding() const { return _breach_escape_active && _breach_escape_waiting_strict_replan; }
+
     // update return status enum
     enum AP_OADijkstra_State : uint8_t {
         DIJKSTRA_STATE_NOT_REQUIRED = 0,
@@ -135,6 +142,20 @@ private:
     Location _next_destination_prev;// next_destination of previous iterations (used to determine if path should be re-calculated)
     uint8_t _path_idx_returned;     // index into _path array which gives location vehicle should be currently moving towards
     bool _dest_to_next_dest_clear;  // true if path from destination to next_destination is clear (i.e. does not intersect a fence)
+
+    // breach-escape state
+    // when the vehicle is currently breaching a fence, Dijkstra overrides its normal output with a
+    // short straight-line move to the nearest safe location.  the cached escape point keeps the
+    // commanded destination stable while the vehicle is flying it out.
+    bool _breach_escape_active = false;     // true while we are commanding an escape-out-of-breach
+    Location _breach_escape_origin;         // vehicle location when the escape vector was started
+    Location _breach_escape_destination;    // cached escape destination (only valid when _breach_escape_active)
+    bool _breach_escape_waiting_strict_replan = false;   // true after reaching escape point, until mode advances past unreachable target
+    uint32_t _breach_escape_error_last_ms = 0;  // last time we sent a "cannot calculate" message to GCS
+
+    // calculate a safe escape destination outside every breached fence at margin distance from the boundary
+    // returns true and populates escape_loc on success.  altitude of escape_loc is copied from current_loc.
+    bool calc_breach_escape_point(const Location &current_loc, Location &escape_loc) const;
 
     // inclusion polygon (with margin) related variables
     float _polyfence_margin = 10;           // margin around polygon defaults to 10m but is overriden with set_fence_margin

@@ -8,6 +8,7 @@ from __future__ import print_function
 import copy
 import math
 import os
+import re
 import shutil
 import time
 import numpy
@@ -23,6 +24,9 @@ from pysim import vehicleinfo
 from common import AutoTest
 from common import NotAchievedException, AutoTestTimeoutException, PreconditionFailedException
 from common import Test
+
+import oafastwp_phase0
+import oafastwp_phase1
 from common import MAV_POS_TARGET_TYPE_MASK
 
 from pymavlink.rotmat import Vector3
@@ -9163,51 +9167,23 @@ class AutoTestCopter(AutoTest):
         Test Dijkstra pathfinding from inside exclusion fence to HOME
         
         This test verifies that the drone can RTL while inside an exclusion fence
-        with OA enabled.
+        with OA enabled, including breach-escape vector and post-escape RTL home.
         '''
         self.context_push()
-        
-        self.clear_fence()
-        
-        # Enable Dijkstra path planning
-        self.set_parameters({
-            'OA_TYPE': 2,  # Dijkstra
-            'OA_MARGIN_MAX': 5,
-            'FENCE_TYPE': 7,
-            'FENCE_ACTION': 1,
-            'WPNAV_SPEED': 500,
-            'RTL_ALT': 1500
-        })
-        
-        # Need to reboot after enabling OA
-        self.reboot_sitl()
-        
-        self.load_fence_by_type(
-            "copter-dijkstra-exclusion-fence.txt",
-            mavutil.mavlink.MAV_CMD_NAV_FENCE_CIRCLE_EXCLUSION,
-            circle_radius=20
-        )
-        self.do_fence_enable()
-        self.assert_fence_enabled()
-
-        self.takeoff(15, mode='ALT_HOLD')
-        
-        self.progress("flying forwards")
-        self.set_rc(2, 1100)
-        
-        # wait for fence to trigger
-        self.wait_mode('RTL', timeout=10)
-        self.wait_statustext("Fence Breached")
-        self.set_rc(2, 1500)
-        
-        self.wait_rtl_complete()
-
-        self.zero_throttle()
-        self.progress("Successfully returned HOME using Dijkstra from inside exclusion")
-
-        self.context_pop()
-        self.clear_fence()
-        self.disarm_vehicle(force=True)
+        self.context_collect('STATUSTEXT')
+        try:
+            self.clear_fence()
+            self.oafastwp_setup_exclusion_fence()
+            self.oafastwp_trigger_breach_and_rtl()
+            self.oafastwp_wait_rtl_complete_staying_outside_fence()
+            self.oafastwp_assert_no_debug_gcs_messages()
+            self.oafastwp_assert_oadj_state_seen(state=2, min_count=1)
+            self.zero_throttle()
+            self.progress("Successfully returned HOME using Dijkstra from inside exclusion")
+        finally:
+            self.context_pop()
+            self.clear_fence()
+            self.disarm_vehicle(force=True)
 
     def Dijkstra_FenceRecovery_PathPlanningReturn(self):
         '''
@@ -9487,6 +9463,461 @@ class AutoTestCopter(AutoTest):
         ])
         return ret
 
+    # --- OAfastWP shared helpers (all phases) ---
+    OAFASTWP_EXCLUSION_CENTER = mavutil.location(-35.3629712, 149.1646305, 584, 0)
+    OAFASTWP_EXCLUSION_RADIUS_M = 20
+    # West of exclusion; direct RTL to home crosses the fence (SITL-14).
+    OAFASTWP_RTL_STAGING_WEST = mavutil.location(-35.3629712, 149.1642000, 584, 0)
+    # Just outside exclusion on east side (unused — guided dest is rejected before approach).
+    OAFASTWP_GUIDED_APPROACH_EAST = mavutil.location(-35.3629712, 149.164855, 584, 0)
+    OAFASTWP_ASSETS = 'ArduCopter_Tests/OAfastWP_Regression_Assets'
+
+    def oafastwp_assets_filepath(self, filename):
+        return os.path.join(testdir, self.OAFASTWP_ASSETS, filename)
+
+    def oafastwp_load_asset_mission(self, filename):
+        return self.load_mission_from_filepath(self.OAFASTWP_ASSETS, filename)
+
+    def oafastwp_load_mission_or_asset(self, filename, asset_filename=None):
+        local = os.path.join(testdir, self.current_test_name_directory, filename)
+        if os.path.exists(local):
+            self.load_mission(filename)
+        else:
+            self.oafastwp_load_asset_mission(asset_filename or filename)
+
+    def oafastwp_load_multiple_asset_fences(self, fence_specs):
+        old = self.current_test_name_directory
+        self.current_test_name_directory = self.OAFASTWP_ASSETS + '/'
+        try:
+            self.load_multiple_fences(fence_specs)
+        finally:
+            self.current_test_name_directory = old
+
+    def oafastwp_load_asset_fence_by_type(self, filename, fence_type, circle_radius=None):
+        filepath = self.oafastwp_assets_filepath(filename)
+        self.progress("Loading fence from (%s) with type %s" % (filepath, fence_type))
+        locs = []
+        for line in open(filepath, 'rb'):
+            if len(line) == 0:
+                continue
+            m = re.match(r"([-\d.]+)\s+([-\d.]+)\s*", line.decode('ascii'))
+            if m is None:
+                raise ValueError("Did not match (%s)" % line)
+            loc = mavutil.location(float(m.group(1)), float(m.group(2)), 0, 0)
+            if fence_type in [mavutil.mavlink.MAV_CMD_NAV_FENCE_CIRCLE_EXCLUSION,
+                              mavutil.mavlink.MAV_CMD_NAV_FENCE_CIRCLE_INCLUSION]:
+                if circle_radius is None:
+                    raise ValueError("Circle radius required")
+                loc = {"loc": loc, "radius": circle_radius}
+            locs.append(loc)
+        if fence_type in [mavutil.mavlink.MAV_CMD_NAV_FENCE_CIRCLE_EXCLUSION,
+                          mavutil.mavlink.MAV_CMD_NAV_FENCE_CIRCLE_INCLUSION]:
+            self.upload_fences_from_locations(fence_type, locs)
+        else:
+            self.upload_fences_from_locations(fence_type, [locs])
+
+    def oafastwp_setup_dijkstra(self, oa_options=4, extra_params=None):
+        params = self.oafastwp_common_params()
+        params['OA_OPTIONS'] = oa_options
+        if extra_params:
+            params.update(extra_params)
+        self.set_parameters(params)
+        self.reboot_sitl()
+
+    def oafastwp_run_auto_mission(self, mission_file, final_wp, timeout=180):
+        self.oafastwp_load_asset_mission(mission_file)
+        self.change_mode('LOITER')
+        self.wait_ready_to_arm()
+        self.arm_vehicle()
+        self.change_mode('AUTO')
+        self.set_rc(3, 1500)
+        self.wait_current_waypoint(final_wp, timeout=timeout)
+
+    def oafastwp_assert_no_fence_breach(self):
+        c = self.context_get().collections.get("STATUSTEXT", [])
+        if any("Fence Breached" in x.text for x in c):
+            raise NotAchievedException("Unexpected fence breach")
+
+    def oafastwp_common_params(self):
+        return {
+            'OA_TYPE': 2,
+            'OA_OPTIONS': 4,  # OA_OPTION_FAST_WAYPOINTS
+            'OA_MARGIN_MAX': 5,
+            'FENCE_TYPE': 7,
+            'FENCE_ACTION': 1,
+            'WPNAV_SPEED': 500,
+            'RTL_ALT': 1500,
+        }
+
+    def oafastwp_setup_exclusion_fence(self, fence_filename="copter-dijkstra-exclusion-fence.txt"):
+        self.set_parameters(self.oafastwp_common_params())
+        self.reboot_sitl()
+        local = os.path.join(testdir, self.current_test_name_directory, fence_filename)
+        if os.path.exists(local):
+            self.load_fence_by_type(
+                fence_filename,
+                mavutil.mavlink.MAV_CMD_NAV_FENCE_CIRCLE_EXCLUSION,
+                circle_radius=self.OAFASTWP_EXCLUSION_RADIUS_M)
+        else:
+            self.oafastwp_load_asset_fence_by_type(
+                'circle-exclusion-main.txt',
+                mavutil.mavlink.MAV_CMD_NAV_FENCE_CIRCLE_EXCLUSION,
+                circle_radius=self.OAFASTWP_EXCLUSION_RADIUS_M)
+        self.do_fence_enable()
+        self.assert_fence_enabled()
+
+    def oafastwp_distance_to_exclusion_center_m(self):
+        loc = self.sim_location()
+        return self.get_distance(loc, self.OAFASTWP_EXCLUSION_CENTER)
+
+    def oafastwp_assert_outside_exclusion_fence(self, margin_m=1.0):
+        dist = self.oafastwp_distance_to_exclusion_center_m()
+        min_dist = self.OAFASTWP_EXCLUSION_RADIUS_M + margin_m
+        if dist < min_dist:
+            raise NotAchievedException(
+                "Inside exclusion fence: dist=%.1fm (need >= %.1fm)" % (dist, min_dist))
+
+    def oafastwp_wait_rtl_near_home(self, distance_max=10, min_alt=10, timeout=250):
+        '''Wait until RTL brings the vehicle near home, staying airborne for the next cycle.'''
+        tstart = self.get_sim_time()
+        while self.get_sim_time_cached() < tstart + timeout:
+            home_distance = self.distance_to_home(use_cached_home=True)
+            m = self.mav.recv_match(type='GLOBAL_POSITION_INT', blocking=True, timeout=1)
+            if m is None:
+                continue
+            alt = m.relative_alt / 1000.0
+            if home_distance <= distance_max and alt >= min_alt:
+                break
+        else:
+            raise AutoTestTimeoutException("Did not reach near home at safe altitude")
+        # zero_throttle() in RTL triggers landing; stay in LOITER until the next breach.
+        self.change_mode('LOITER')
+        self.hover()
+        self.delay_sim_time(3)
+
+    def oafastwp_trigger_breach_and_rtl(self, need_takeoff=True, alt=15):
+        if need_takeoff:
+            self.takeoff(alt, mode='ALT_HOLD')
+        else:
+            if not self.armed():
+                raise NotAchievedException("Not armed before repeat breach cycle")
+            m = self.assert_receive_message('GLOBAL_POSITION_INT')
+            if m.relative_alt / 1000.0 < alt - 3:
+                self.user_takeoff(alt_min=alt)
+            # After RTL near home the nose points at home, away from the exclusion fence.
+            self.change_mode('ALT_HOLD')
+            heading = self.bearing_to(self.OAFASTWP_EXCLUSION_CENTER)
+            self.guided_achieve_heading(heading, accuracy=10)
+        self.progress("Flying into exclusion fence to trigger breach + RTL")
+        self.set_rc(2, 1100)
+        self.wait_mode('RTL', timeout=30)
+        self.wait_statustext("Fence Breached", timeout=30)
+        self.set_rc(2, 1500)
+
+    def oafastwp_guided_goto_location(self, loc, alt=15, duration=10):
+        '''Send GUIDED position targets for duration seconds (OA needs continuous updates).'''
+        self.change_mode('GUIDED')
+        tstart = self.get_sim_time()
+        while self.get_sim_time_cached() < tstart + duration:
+            self.mav.mav.set_position_target_global_int_send(
+                0, 1, 1,
+                mavutil.mavlink.MAV_FRAME_GLOBAL_RELATIVE_ALT_INT,
+                MAV_POS_TARGET_TYPE_MASK.POS_ONLY | MAV_POS_TARGET_TYPE_MASK.LAST_BYTE,
+                int(loc.lat * 1e7),
+                int(loc.lng * 1e7),
+                alt,
+                0, 0, 0, 0, 0, 0, 0, 0)
+            self.delay_sim_time(1)
+
+    def oafastwp_wait_breach_escaped(self, margin_m=2.0, timeout=120):
+        '''Wait until breach escape reaches stand-off outside exclusion.'''
+        tstart = self.get_sim_time()
+        min_dist = self.OAFASTWP_EXCLUSION_RADIUS_M + margin_m
+        while self.get_sim_time_cached() < tstart + timeout:
+            dist = self.oafastwp_distance_to_exclusion_center_m()
+            self.progress("Waiting breach escape: fence dist=%.1fm (need >= %.1fm)" % (dist, min_dist))
+            if dist >= min_dist:
+                self.delay_sim_time(2)
+                return
+        raise AutoTestTimeoutException("Did not reach escape stand-off outside fence")
+
+    def oafastwp_wait_rtl_complete_staying_outside_fence(self, check_alt=True, distance_max=10, timeout=250):
+        '''Wait for RTL home; fail only if vehicle re-enters exclusion after escaping (SITL-27).'''
+        self.progress("Waiting RTL to reach Home (monitoring for fence re-entry after escape)")
+        tstart = self.get_sim_time()
+        escaped_once = False
+        while self.get_sim_time_cached() < tstart + timeout:
+            dist = self.oafastwp_distance_to_exclusion_center_m()
+            home_distance = self.distance_to_home(use_cached_home=True)
+            outside_fence = dist >= (self.OAFASTWP_EXCLUSION_RADIUS_M + 0.5)
+            if outside_fence:
+                escaped_once = True
+            # after a successful escape, re-entering the exclusion is the pendulum failure mode
+            if escaped_once and home_distance > 25 and dist < (self.OAFASTWP_EXCLUSION_RADIUS_M - 1.0):
+                raise NotAchievedException(
+                    "Re-entered exclusion fence during RTL (dist=%.1fm)" % dist)
+            m = self.mav.recv_match(type='GLOBAL_POSITION_INT', blocking=True, timeout=1)
+            if m is None:
+                continue
+            alt = m.relative_alt / 1000.0
+            at_home = home_distance < distance_max
+            if check_alt:
+                at_home = at_home and alt <= 1
+            self.progress("Alt: %.02f  HomeDist: %.02f  FenceDist: %.02f  escaped=%s" %
+                          (alt, home_distance, dist, escaped_once))
+            if not self.armed():
+                if not at_home:
+                    raise NotAchievedException("Disarmed before reaching home")
+                if not escaped_once:
+                    raise NotAchievedException("RTL completed but vehicle never left exclusion fence")
+                return
+        raise AutoTestTimeoutException("Did not reach home and disarm")
+
+    def oafastwp_assert_no_debug_gcs_messages(self):
+        for bad in ("OADJ: dest unreachable", "strict replan complete"):
+            if self.statustext_in_collections(bad):
+                raise NotAchievedException("Unexpected debug GCS message: %s" % bad)
+
+    def oafastwp_assert_oadj_state_seen(self, state, min_count=1):
+        count = 0
+        dfreader = self.dfreader_for_current_onboard_log()
+        while True:
+            m = dfreader.recv_match(type='OADJ')
+            if m is None:
+                break
+            if m.State == state:
+                count += 1
+        if count < min_count:
+            raise NotAchievedException(
+                "Expected >= %u OADJ State=%u entries, saw %u" % (min_count, state, count))
+
+    def OAfastWP_BreachEscape_RTL_Home(self):
+        '''
+        Phase 1: breach escape vector, auto RTL hand-off, no re-entry, clean GCS (SITL-25/26/27/31).
+        '''
+        self.context_push()
+        self.context_collect('STATUSTEXT')
+        try:
+            self.clear_fence()
+            self.oafastwp_setup_exclusion_fence()
+            self.oafastwp_trigger_breach_and_rtl()
+            self.oafastwp_wait_rtl_complete_staying_outside_fence()
+            self.oafastwp_assert_no_debug_gcs_messages()
+            self.oafastwp_assert_oadj_state_seen(state=2, min_count=1)
+            self.progress("OAfastWP breach escape RTL home: PASS")
+        finally:
+            self.context_pop()
+            self.clear_fence()
+            self.disarm_vehicle(force=True)
+
+    def OAfastWP_MissionWP_InsideExclusion(self):
+        '''
+        Phase 1: AUTO mission waypoint inside exclusion holds with path error (SITL-28).
+        '''
+        self.context_push()
+        self.context_collect('STATUSTEXT')
+        try:
+            self.clear_fence()
+            self.oafastwp_setup_exclusion_fence()
+            self.load_mission("oafastwp-wp-inside-exclusion.txt")
+            self.change_mode("LOITER")
+            self.wait_ready_to_arm()
+            self.arm_vehicle()
+            self.change_mode("AUTO")
+            self.set_rc(3, 1500)
+            self.wait_statustext("Dijkstra: could not find path", timeout=120)
+            self.delay_sim_time(12)
+            c = self.context_get().collections.get("STATUSTEXT", [])
+            fail_count = sum(1 for x in c if "could not find path" in x.text.lower())
+            if fail_count < 2:
+                raise NotAchievedException(
+                    "Expected repeated path failure messages, saw %u" % fail_count)
+            if not self.armed():
+                raise NotAchievedException("Vehicle disarmed unexpectedly")
+            self.progress("OAfastWP mission WP inside exclusion: PASS")
+        finally:
+            self.zero_throttle()
+            self.context_pop()
+            self.clear_fence()
+            self.disarm_vehicle(force=True)
+
+    def OAfastWP_BreachEscape_RepeatedCycles(self):
+        '''
+        Phase 1: repeated breach -> escape -> RTL home cycles (SITL-30).
+        '''
+        cycles = 3
+        self.context_push()
+        self.context_collect('STATUSTEXT')
+        try:
+            self.clear_fence()
+            self.oafastwp_setup_exclusion_fence()
+            for i in range(cycles):
+                self.start_subtest("Breach RTL cycle %u/%u" % (i + 1, cycles))
+                self.oafastwp_trigger_breach_and_rtl(need_takeoff=(i == 0))
+                if i == cycles - 1:
+                    self.oafastwp_wait_rtl_complete_staying_outside_fence()
+                else:
+                    self.oafastwp_wait_rtl_near_home()
+                self.oafastwp_assert_no_debug_gcs_messages()
+            self.oafastwp_assert_oadj_state_seen(state=2, min_count=cycles)
+            self.progress("OAfastWP repeated breach RTL cycles: PASS")
+        finally:
+            self.context_pop()
+            self.clear_fence()
+            self.disarm_vehicle(force=True)
+
+    def testsOAfastWPPhase3(self):
+        '''OAfastWP Phase 3 - fence escape vector SITL-25..31 (copter only).'''
+        return [
+            self.OAfastWP_BreachEscape_RTL_Home,
+            self.OAfastWP_MissionWP_InsideExclusion,
+            self.OAfastWP_BreachEscape_RepeatedCycles,
+        ]
+
+    def OAfastWP_GuidedInsideExclusion(self):
+        '''
+        Phase 2A: GUIDED goto inside exclusion is rejected; vehicle holds outside (SITL-29).
+        GUIDED rejects dest via check_destination_within_fence (no Dijkstra path message).
+        '''
+        self.context_push()
+        self.context_collect('STATUSTEXT')
+        try:
+            self.clear_fence()
+            self.oafastwp_setup_exclusion_fence()
+            self.takeoff(15, mode='GUIDED')
+            start_dist = self.oafastwp_distance_to_exclusion_center_m()
+            self.oafastwp_guided_goto_location(self.OAFASTWP_EXCLUSION_CENTER, alt=15, duration=25)
+            self.delay_sim_time(10)
+            if self.mav.flightmode == 'RTL':
+                raise NotAchievedException(
+                    "Unexpected RTL - guided dest should be rejected, not cause breach-RTL")
+            end_dist = self.oafastwp_distance_to_exclusion_center_m()
+            if end_dist < (self.OAFASTWP_EXCLUSION_RADIUS_M - 2):
+                raise NotAchievedException("Entered exclusion fence (dist=%.1fm)" % end_dist)
+            if end_dist < start_dist - 5:
+                raise NotAchievedException(
+                    "Moved toward exclusion (%.1fm -> %.1fm)" % (start_dist, end_dist))
+            if not self.armed():
+                raise NotAchievedException("Vehicle disarmed unexpectedly")
+            self.progress("OAfastWP guided inside exclusion: PASS")
+        finally:
+            self.context_pop()
+            self.clear_fence()
+            self.disarm_vehicle(force=True)
+
+    def OAfastWP_BreachEscape_ModeChangeAtStandoff(self):
+        '''
+        Phase 2A: RTL -> Loiter -> RTL at escape stand-off still reaches home (SITL-32).
+        '''
+        self.context_push()
+        self.context_collect('STATUSTEXT')
+        try:
+            self.clear_fence()
+            self.oafastwp_setup_exclusion_fence()
+            self.oafastwp_trigger_breach_and_rtl()
+            self.oafastwp_wait_breach_escaped()
+            self.progress("Mode change at stand-off: RTL -> Loiter -> RTL")
+            self.change_mode('LOITER')
+            self.hover()
+            self.delay_sim_time(3)
+            self.change_mode('RTL')
+            self.oafastwp_wait_rtl_complete_staying_outside_fence()
+            self.oafastwp_assert_no_debug_gcs_messages()
+            self.progress("OAfastWP mode change at stand-off: PASS")
+        finally:
+            self.context_pop()
+            self.clear_fence()
+            self.disarm_vehicle(force=True)
+
+    def OAfastWP_RTL_BlockedPath(self):
+        '''
+        Phase 2B: RTL with exclusion fence between aircraft and home (SITL-14).
+        '''
+        self.context_push()
+        self.context_collect('STATUSTEXT')
+        try:
+            self.clear_fence()
+            self.oafastwp_setup_exclusion_fence()
+            self.do_fence_disable()
+            self.takeoff(15, mode='GUIDED')
+            self.oafastwp_guided_goto_location(self.OAFASTWP_RTL_STAGING_WEST, alt=15, duration=40)
+            self.wait_location(self.OAFASTWP_RTL_STAGING_WEST, accuracy=15, timeout=120)
+            self.oafastwp_assert_outside_exclusion_fence(margin_m=0.5)
+            self.do_fence_enable()
+            self.assert_fence_enabled()
+            self.change_mode('RTL')
+            self.oafastwp_wait_rtl_complete_staying_outside_fence()
+            self.progress("OAfastWP RTL blocked path: PASS")
+        finally:
+            self.context_pop()
+            self.clear_fence()
+            self.disarm_vehicle(force=True)
+
+    def OAfastWP_FastWaypoints_Mission(self):
+        '''
+        Phase 2B: AUTO mission with fast waypoints routes around exclusion fence (SITL-17).
+        '''
+        self.context_push()
+        self.context_collect('STATUSTEXT')
+        try:
+            self.clear_fence()
+            self.oafastwp_setup_exclusion_fence()
+            self.oafastwp_load_mission_or_asset(
+                "oafastwp-mission-around-fence.txt", "mission-around-west.txt")
+            self.change_mode("LOITER")
+            self.wait_ready_to_arm()
+            self.arm_vehicle()
+            self.change_mode("AUTO")
+            self.set_rc(3, 1500)
+            self.wait_current_waypoint(4, timeout=180)
+            self.delay_sim_time(5)
+            c = self.context_get().collections.get("STATUSTEXT", [])
+            if any("Fence Breached" in x.text for x in c):
+                raise NotAchievedException("Mission caused fence breach")
+            self.oafastwp_assert_outside_exclusion_fence(margin_m=-1.0)
+            self.progress("OAfastWP fast waypoints mission: PASS")
+        finally:
+            self.zero_throttle()
+            self.context_pop()
+            self.clear_fence()
+            self.disarm_vehicle(force=True)
+
+    def OAfastWP_ThreePointDogleg(self):
+        '''
+        Phase 2B: three close waypoints with fast-waypoint dogleg smoothing (SITL-23).
+        '''
+        self.context_push()
+        try:
+            self.clear_fence()
+            self.set_parameters(self.oafastwp_common_params())
+            self.reboot_sitl()
+            self.oafastwp_load_mission_or_asset(
+                "oafastwp-three-point-dogleg.txt", "mission-three-point-dogleg.txt")
+            self.change_mode("LOITER")
+            self.wait_ready_to_arm()
+            self.arm_vehicle()
+            self.change_mode("AUTO")
+            self.set_rc(3, 1500)
+            self.wait_current_waypoint(4, timeout=120)
+            self.delay_sim_time(3)
+            if not self.armed():
+                raise NotAchievedException("Vehicle disarmed during dogleg mission")
+            self.progress("OAfastWP three-point dogleg: PASS")
+        finally:
+            self.zero_throttle()
+            self.context_pop()
+            self.disarm_vehicle(force=True)
+
+    def testsOAfastWPPhase2(self):
+        '''OAfastWP Phase 2 - batch-2 gaps + key regression (copter only).'''
+        return [
+            self.OAfastWP_GuidedInsideExclusion,
+            self.OAfastWP_BreachEscape_ModeChangeAtStandoff,
+            self.OAfastWP_RTL_BlockedPath,
+            self.OAfastWP_FastWaypoints_Mission,
+            self.OAfastWP_ThreePointDogleg,
+        ]
+
     def testsMA(self):
         '''return list of custom MA tests'''
         ret = ([
@@ -9563,3 +9994,27 @@ class AutoTestCopterTestsMA(AutoTestCopter):
 
     def tests(self):
         return self.testsMA()
+
+
+class AutoTestCopterTestsOAfastWPPhase0(oafastwp_phase0.OAfastWPPhase0Mixin, AutoTestCopter):
+
+    def tests(self):
+        return self.testsOAfastWPPhase0()
+
+
+class AutoTestCopterTestsOAfastWPPhase1(oafastwp_phase1.OAfastWPPhase1Mixin, AutoTestCopter):
+
+    def tests(self):
+        return self.testsOAfastWPPhase1()
+
+
+class AutoTestCopterTestsOAfastWPPhase2(AutoTestCopter):
+
+    def tests(self):
+        return self.testsOAfastWPPhase2()
+
+
+class AutoTestCopterTestsOAfastWPPhase3(AutoTestCopter):
+
+    def tests(self):
+        return self.testsOAfastWPPhase3()
