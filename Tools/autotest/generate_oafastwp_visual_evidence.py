@@ -106,8 +106,8 @@ KIND_CSS = {
 def collect_results(buildlogs, tests):
     results = []
     for name, sitl, desc in tests:
-        txt = rpt.latest_test_log(buildlogs, name)
-        tlog = rpt.latest_file(os.path.join(buildlogs, 'ArduCopter-%s-autotest-*.tlog' % name))
+        txt = rpt.latest_test_log_for_campaign(buildlogs, name)
+        tlog = rpt.latest_tlog_for_test(buildlogs, name)
         binlog = rpt.latest_bin_for_test(buildlogs, name)
 
         passed = False
@@ -280,20 +280,29 @@ def write_visual_dashboard(out_dir, phase_num, results):
     return report_path
 
 
-def run_phase(phase_num, buildlogs, output_base):
+def run_phase(phase_num, buildlogs, output_base=None):
     tests_map = {0: PHASE0_TESTS, 1: PHASE1_TESTS, 2: PHASE2_TESTS, 3: PHASE3_TESTS}
     stamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    out_dir = os.path.join(output_base, stamp)
+    evidence_base = output_base or campaign.campaign_evidence_dir()
+    run_dir = os.path.join(evidence_base, stamp)
+    os.makedirs(run_dir, exist_ok=True)
+
+    prev_run = campaign.resolve_latest_run(evidence_base)
+    if prev_run and os.path.abspath(prev_run) != os.path.abspath(run_dir):
+        campaign.copy_other_phase_dirs(prev_run, run_dir, skip_phase=phase_num)
+
+    out_dir = os.path.join(run_dir, campaign.phase_dir_name(phase_num))
+    os.makedirs(out_dir, exist_ok=True)
     results = collect_results(buildlogs, tests_map[phase_num])
     path = write_visual_dashboard(out_dir, phase_num, results)
-    latest = os.path.join(output_base, 'latest')
+    latest = os.path.join(evidence_base, 'latest')
     if os.path.islink(latest):
         os.unlink(latest)
     elif os.path.isdir(latest):
         shutil.rmtree(latest)
-    os.symlink(out_dir, latest)
+    os.symlink(run_dir, latest)
     print('Visual evidence: %s' % path)
-    print('Latest dashboard: %s/index.html' % latest)
+    print('Latest dashboard: %s/index.html' % campaign.phase_evidence_dir(phase_num))
     return 0 if all(r['passed'] for r in results) else 1
 
 
@@ -308,18 +317,16 @@ def main():
         rc = 0
         for p in (0, 1, 2, 3):
             buildlogs = os.path.abspath(args.buildlogs or campaign.phase_buildlogs(p))
-            output_base = args.output or campaign.phase_visual_evidence(p)
             if os.path.isdir(buildlogs):
-                rc = max(rc, run_phase(p, buildlogs, output_base))
+                rc = max(rc, run_phase(p, buildlogs, output_base=args.output))
         return rc
 
     phase_num = int(args.phase)
     buildlogs = os.path.abspath(args.buildlogs or campaign.phase_buildlogs(phase_num))
-    output_base = args.output or campaign.phase_visual_evidence(phase_num)
     if not os.path.isdir(buildlogs):
         print('Logs not found: %s' % buildlogs, file=sys.stderr)
         return 1
-    return run_phase(phase_num, buildlogs, output_base)
+    return run_phase(phase_num, buildlogs, output_base=args.output)
 
 
 if __name__ == '__main__':

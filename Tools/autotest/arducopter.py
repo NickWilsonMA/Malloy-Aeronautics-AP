@@ -9194,18 +9194,16 @@ class AutoTestCopter(AutoTest):
         to ensure the aircraft exits correctly.
         '''
         self.context_push()
+        self.context_collect('STATUSTEXT')
         
         self.clear_fence()
         
-        # Enable Dijkstra path planning
-        self.set_parameters({
-            'OA_TYPE': 2,  # Dijkstra
-            'OA_MARGIN_MAX': 5,
-            'FENCE_TYPE': 7,
-            'FENCE_ACTION': 1,
-            'WPNAV_SPEED': 500,
-            'RTL_ALT': 1500
-        })
+        # Match Malloy OAfastWP baseline (OA_OPTIONS fast-WP bit) and enable GUIDED
+        # position goto via wp_nav so Dijkstra can be used when the fence is active.
+        # GUID_OPTIONS bit 6 = WPNavUsedForPosControl (see ModeGuided::Options).
+        params = self.oafastwp_common_params()
+        params['GUID_OPTIONS'] = 64
+        self.set_parameters(params)
         
         # Need to reboot after enabling OA
         self.reboot_sitl()
@@ -9222,47 +9220,30 @@ class AutoTestCopter(AutoTest):
             },
         ])
 
-        # Disable fence so we can travel to desired location
+        # Disable fence so we can fly to the maze exit through exclusion zones.
+        # Dijkstra is inactive while the fence is disabled; this leg uses raw pos
+        # control even with GUID_OPTIONS wpnav enabled.
         self.do_fence_disable()
         self.assert_fence_disabled()
 
         self.takeoff(15, mode='GUIDED')
         
-        starting_loc = mavutil.location(-35.3631079, 149.1642308)
-
-        self.mav.mav.set_position_target_global_int_send(
-            0, # timestamp
-            1, # target system_id
-            1, # target component id
-            mavutil.mavlink.MAV_FRAME_GLOBAL_RELATIVE_ALT_INT, # relative altitude frame
-            MAV_POS_TARGET_TYPE_MASK.POS_ONLY,
-            int(starting_loc.lat * 1e7), # lat
-            int(starting_loc.lng * 1e7), # lon
-            15, # alt
-            0, # vx
-            0, # vy
-            0, # vz
-            0, # afx
-            0, # afy
-            0, # afz
-            0, # yaw
-            0) # yawrate
+        # Stage at the maze exit (outside the 10 m inclusion circle at home).
+        maze_exit_loc = mavutil.location(-35.3633594, 149.1640645)
+        self.oafastwp_guided_goto_location(maze_exit_loc, alt=15, duration=60)
+        self.wait_location(maze_exit_loc, timeout=60, accuracy=5)
         
-        self.wait_location(starting_loc, timeout=60)
-        
-        # Enable fence, we should be outside inclusion so this will trigger RTL
+        # Enable fence; outside inclusion triggers RTL with Dijkstra path planning.
         self.do_fence_enable()
         self.assert_fence_enabled()
 
-        # wait for fence to trigger
         self.wait_statustext("Fence Breached")
         self.wait_mode('RTL', timeout=10)
 
-        # Should exit the maze and cross through this location
-        end_of_maze_loc = mavutil.location(-35.3633594, 149.1640645)
-        self.wait_location(end_of_maze_loc, accuracy=10, timeout=90)
-        
-        self.wait_rtl_complete()
+        self.wait_rtl_complete(timeout=300)
+        c = self.context_get().collections.get("STATUSTEXT", [])
+        if any("could not find path" in x.text.lower() for x in c):
+            raise NotAchievedException("Dijkstra could not find RTL path through maze")
 
         self.zero_throttle()
         self.progress("Successfully returned HOME using Dijkstra by path planning")

@@ -32,18 +32,15 @@ Firmware SITL validation campaign — ${CAMPAIGN_ID}
 Name source: ArduCopter/version.h THISFIRMWARE (must match checked-out git branch suffix).
 
 Workflow:
-  1. Run autotests:   ./Tools/autotest/run_firmware_SITL_validation_campaign_tests.sh <phase> [TestName] [--skip-build]
-  2. Generate report: ./Tools/autotest/generate_firmware_SITL_validation_campaign_artifacts.sh <phase>
-  3. Add phase tab:   ./Tools/autotest/add_firmware_SITL_validation_phase.sh <1|2|3>   (when ready)
+  1. Run autotests:        ./Tools/autotest/run_firmware_SITL_validation_campaign_tests.sh <phase> [TestName] [--skip-build]
+  2. Update spreadsheet:   ./Tools/autotest/generate_firmware_SITL_validation_campaign_artifacts.sh <phase>
 
-Each report/artifacts run creates a new timestamped folder under phase<N>/report/ and
-phase<N>/visual_evidence/ (latest/ symlink always points at the newest run).
+Spreadsheet columns: E=Pass/Fail, F=Re-runs to pass, G=Log ref (from all full + rerun folders).
 
 Layout:
-  phase<N>/logs/              autotest .txt / .tlog / .BIN
-  phase<N>/visual_evidence/   HTML dashboard + PNG cards
-  phase0/report/            firmware regression RTF + HTML (Firmware_Regression_Report.rtf)
+  Phase<N>/logs/              full_<timestamp>/ and rerun_<timestamp>-<TestName>/
   $(basename "${XLSX}")       spreadsheet (Intro + phase tabs)
+  README.txt                  this file
 EOF
 
 echo "=== Campaign ready ==="

@@ -51,6 +51,39 @@ def latest_test_log(buildlogs, test_name):
     return latest_file(pattern)
 
 
+def _resolve_test_dir(logs_root, test_name):
+    try:
+        import firmware_SITL_validation_campaign as campaign
+        return campaign.resolve_test_log_dir(logs_root, test_name)
+    except Exception:
+        return None
+
+
+def latest_test_log_for_campaign(logs_root, test_name):
+    '''Newest log for a test across organized full_/rerun_ run folders.'''
+    test_dir = _resolve_test_dir(logs_root, test_name)
+    if test_dir:
+        txt = latest_test_log(test_dir, test_name)
+        if txt:
+            return txt
+    return latest_test_log(logs_root, test_name)
+
+
+def latest_tlog_for_test(logs_root, test_name):
+    test_dir = _resolve_test_dir(logs_root, test_name) or logs_root
+    return latest_file(os.path.join(test_dir, 'ArduCopter-%s-autotest-*.tlog' % test_name))
+
+
+def latest_bin_for_test(logs_root, test_name):
+    test_dir = _resolve_test_dir(logs_root, test_name) or logs_root
+    files = glob.glob(os.path.join(test_dir, 'ArduCopter-%s-*.BIN' % test_name))
+    if not files:
+        files = glob.glob(os.path.join(test_dir, 'ArduCopter-%s*.BIN' % test_name))
+    if not files:
+        return None
+    return max(files, key=os.path.getsize)
+
+
 def git_hash():
     try:
         out = subprocess.check_output(
@@ -243,13 +276,6 @@ def count_oadj_state(bin_path, state=2):
         return count
     except Exception:
         return None
-
-
-def latest_bin_for_test(buildlogs, test_name):
-    files = glob.glob(os.path.join(buildlogs, 'ArduCopter-%s-*.BIN' % test_name))
-    if not files:
-        return None
-    return max(files, key=os.path.getsize)
 
 
 def meters_to_deg(lat, meters_n, meters_e):

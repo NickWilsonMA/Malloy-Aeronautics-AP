@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
-# Run autotests for one phase (or a single test); logs -> campaign phase<N>/logs/
+# Run autotests for one phase (or a single test).
+#
+# Logs layout under Phase<N>/logs/:
+#   full_<timestamp>/<TestName>/              — full phase run
+#   rerun_<timestamp>-<TestName>/<TestName>/ — individual re-run (+ run_results.json)
+#   run_results.json                         — all reruns aggregate (run_kind: reruns)
 #
 # Usage:
 #   ./Tools/autotest/run_firmware_SITL_validation_campaign_tests.sh 0
 #   ./Tools/autotest/run_firmware_SITL_validation_campaign_tests.sh 0 P0_22_RTL_BrakingDistance --skip-build
-#   ./Tools/autotest/run_firmware_SITL_validation_campaign_tests.sh 0 test.CopterTestsOAfastWPPhase0.P0_22_RTL_BrakingDistance --skip-build
-#
-# Then always:
-#   ./Tools/autotest/generate_firmware_SITL_validation_campaign_artifacts.sh 0
 
 set -euo pipefail
 
@@ -45,9 +46,20 @@ if [[ ! -f "${XLSX}" ]]; then
     exit 1
 fi
 
-BUILDLOGS="$(python3 "${CAMPAIGN_PY}" buildlogs "${PHASE}")"
-mkdir -p "${BUILDLOGS}"
-export BUILDLOGS
+PRIMARY_TEST=""
+if [[ -n "${TEST}" ]]; then
+    RUN_KIND="rerun"
+    if [[ "${TEST}" == test.* ]]; then
+        PRIMARY_TEST="${TEST##*.}"
+    else
+        PRIMARY_TEST="${TEST}"
+    fi
+else
+    RUN_KIND="full"
+fi
+
+STAGING="$(python3 "${CAMPAIGN_PY}" begin-run "${PHASE}" "${RUN_KIND}" "${PRIMARY_TEST}")"
+export BUILDLOGS="${STAGING}"
 
 declare -A SUITES=(
     [0]='test.CopterTestsOAfastWPPhase0'
@@ -67,17 +79,21 @@ if [[ -n "${TEST}" ]]; then
     else
         TARGET="${SUITES[${PHASE}]}.${TEST}"
     fi
-    echo "=== Phase ${PHASE}: re-running ${TARGET} ==="
+    echo "=== Phase ${PHASE}: re-running ${TARGET} (${RUN_KIND} -> rerun_*-${PRIMARY_TEST}) ==="
 else
     TARGET="${SUITES[${PHASE}]}"
-    echo "=== Phase ${PHASE}: running full suite ${TARGET} ==="
+    echo "=== Phase ${PHASE}: running full suite ${TARGET} (${RUN_KIND} run) ==="
 fi
 
-echo "=== Logs: ${BUILDLOGS} ==="
+echo "=== Staging logs: ${BUILDLOGS} ==="
 set +e
 ./Tools/autotest/autotest.py "${TARGET}"
 AUTOTEST_RC=$?
 set -e
+
+echo ""
+echo "=== Organizing logs ==="
+python3 "${CAMPAIGN_PY}" finalize-run "${PHASE}" "${STAGING}" "${RUN_KIND}" "${PRIMARY_TEST}"
 
 python3 "${CAMPAIGN_PY}" summarize "${PHASE}" || true
 
@@ -85,7 +101,7 @@ echo ""
 if [[ "${AUTOTEST_RC}" -eq 0 ]]; then
     echo "=== Autotest complete (all tests in this run passed) ==="
 else
-    echo "=== Autotest complete (one or more tests failed — see summary above) ==="
+    echo "=== Autotest complete (one or more tests failed — see run_results.json) ==="
 fi
 echo "Next: ./Tools/autotest/generate_firmware_SITL_validation_campaign_artifacts.sh ${PHASE}"
 exit "${AUTOTEST_RC}"

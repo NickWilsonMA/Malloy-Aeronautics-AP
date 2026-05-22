@@ -74,10 +74,10 @@ FIRMWARE_VERSION = campaign.FIRMWARE_VERSION
 REPORT_TITLE = campaign.CAMPAIGN_TITLE
 
 PHASE_SHEET_NAMES = {
-    0: campaign.PHASE0_WORKSHEET_NAME,
-    1: 'Phase 1 - Fence regression',
-    2: 'Phase 2 - Fast-WP integration',
-    3: 'Phase 3 - Breach escape gate',
+    0: 'Phase 0',
+    1: 'Phase 1',
+    2: 'Phase 2',
+    3: 'Phase 3',
 }
 
 PHASE_INFO = [
@@ -95,7 +95,7 @@ PHASE_INFO = [
         'script': campaign.RUN_TESTS_SCRIPT + ' 0',
         'autotest': 'test.CopterTestsOAfastWPPhase0',
         'worksheet': PHASE_SHEET_NAMES[0],
-        'result_cols': 'E–F (Pass/Fail, Log ref on phase tab)',
+        'result_cols': 'E–G (Pass/Fail, Re-runs, Log ref on phase tab)',
     },
     {
         'phase': '1',
@@ -111,7 +111,7 @@ PHASE_INFO = [
         'script': campaign.RUN_TESTS_SCRIPT + ' 1',
         'autotest': 'test.CopterTestsOAfastWPPhase1',
         'worksheet': PHASE_SHEET_NAMES[1],
-        'result_cols': 'E–F (Pass/Fail, Log ref on phase tab)',
+        'result_cols': 'E–G (Pass/Fail, Re-runs, Log ref on phase tab)',
     },
     {
         'phase': '2',
@@ -127,7 +127,7 @@ PHASE_INFO = [
         'script': campaign.RUN_TESTS_SCRIPT + ' 2',
         'autotest': 'test.CopterTestsOAfastWPPhase2',
         'worksheet': PHASE_SHEET_NAMES[2],
-        'result_cols': 'E–F (Pass/Fail, Log ref on phase tab)',
+        'result_cols': 'E–G (Pass/Fail, Re-runs, Log ref on phase tab)',
     },
     {
         'phase': '3',
@@ -143,7 +143,7 @@ PHASE_INFO = [
         'script': campaign.RUN_TESTS_SCRIPT + ' 3',
         'autotest': 'test.CopterTestsOAfastWPPhase3',
         'worksheet': PHASE_SHEET_NAMES[3],
-        'result_cols': 'E–F (Pass/Fail, Log ref on phase tab)',
+        'result_cols': 'E–G (Pass/Fail, Re-runs, Log ref on phase tab)',
     },
 ]
 
@@ -342,8 +342,8 @@ def _write_intro_sheet(wb, active_phases):
     ws.merge_cells('A%d:I%d' % (row, row))
     ws.cell(row, 1, (
         '0. New firmware:         update THISFIRMWARE in ArduCopter/version.h, then %s\n'
-        '1. Run autotests:        %s <phase>\n'
-        '2. Generate artifacts:   %s <phase>\n'
+        '1. Run autotests:        %s <phase> [TestName] [--skip-build]\n'
+        '2. Update spreadsheet:   %s <phase>\n'
         'Add later phases:        %s <1|2|3>'
         % (campaign.RESET_SCRIPT, campaign.RUN_TESTS_SCRIPT,
            campaign.GENERATE_ARTIFACTS_SCRIPT, campaign.ADD_PHASE_SCRIPT)
@@ -352,16 +352,15 @@ def _write_intro_sheet(wb, active_phases):
 
     row += 2
     ws.merge_cells('A%d:I%d' % (row, row))
-    ws.cell(row, 1, 'Evidence layout (under docs/%s/)' % campaign.CAMPAIGN_ID).font = section_font
+    ws.cell(row, 1, 'Log layout (under docs/%s/)' % campaign.CAMPAIGN_ID).font = section_font
     row += 1
     ws.merge_cells('A%d:I%d' % (row, row))
     ws.cell(row, 1, (
-        'phase<N>/logs/              autotest .txt / .tlog / .BIN output\n'
-        'phase<N>/visual_evidence/   HTML dashboard + PNG result cards\n'
-        'phase0/report/              firmware regression RTF + HTML (%s)\n'
-        'phase<N>/report/            phase HTML report (phases 1–3)\n'
-        'Spreadsheet columns E–F: Pass/Fail and log ref on each phase tab.'
-        % campaign.FIRMWARE_REGRESSION_RTF_NAME
+        'Phase<N>/logs/              full_<timestamp>/<TestName>/ (.txt, .tlog, .BIN)\n'
+        '                              rerun_<timestamp>-<TestName>/ per failed test\n'
+        '                              run_results.json — aggregate rerun summary\n'
+        'Spreadsheet columns E–G: Pass/Fail, Re-runs to pass, and log ref on each phase tab.\n'
+        'On FAIL: open the .tlog in the test log folder and decide test vs firmware issue.'
     )).font = body_font
     ws.cell(row, 1).alignment = wrap
 
@@ -396,7 +395,7 @@ def _write_phase_sheet(wb, phase):
 
     headers = [
         'Test ID', 'Test Case', 'Setup / Action', 'Expected Result',
-        'Pass / Fail', 'Log ref', 'Firmware', 'Autotest method',
+        'Pass / Fail', 'Re-runs', 'Log ref', 'Firmware', 'Autotest method',
     ]
     header_row = 2
     for c, h in enumerate(headers, 1):
@@ -413,9 +412,9 @@ def _write_phase_sheet(wb, phase):
             ws.cell(row, 2, case)
             ws.cell(row, 3, setup)
             ws.cell(row, 4, expected)
-            ws.cell(row, 7, FIRMWARE_VERSION)
-            ws.cell(row, 8, autotest)
-            for c in range(1, 9):
+            ws.cell(row, 8, FIRMWARE_VERSION)
+            ws.cell(row, 9, autotest)
+            for c in range(1, 10):
                 ws.cell(row, c).alignment = wrap
                 if phase == 0:
                     ws.cell(row, c).fill = tab_fill
@@ -427,13 +426,13 @@ def _write_phase_sheet(wb, phase):
             ws.cell(row, 2, case)
             ws.cell(row, 3, setup)
             ws.cell(row, 4, expected)
-            ws.cell(row, 7, FIRMWARE_VERSION)
-            ws.cell(row, 8, autotest_map.get(tid, ''))
-            for c in range(1, 9):
+            ws.cell(row, 8, FIRMWARE_VERSION)
+            ws.cell(row, 9, autotest_map.get(tid, ''))
+            for c in range(1, 10):
                 ws.cell(row, c).alignment = wrap
             row += 1
 
-    widths = {'A': 10, 'B': 28, 'C': 42, 'D': 42, 'E': 14, 'F': 36, 'G': 10, 'H': 32}
+    widths = {'A': 10, 'B': 28, 'C': 42, 'D': 42, 'E': 14, 'F': 10, 'G': 36, 'H': 10, 'I': 32}
     for col, w in widths.items():
         ws.column_dimensions[col].width = w
     ws.row_dimensions[1].height = 24

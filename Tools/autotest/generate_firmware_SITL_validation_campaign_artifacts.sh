@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Smart campaign artifacts (detects reruns, updates spreadsheet, prints paths).
+# Update campaign spreadsheet from autotest logs (all phases with data on disk).
 #
 # Usage:
 #   ./Tools/autotest/generate_firmware_SITL_validation_campaign_artifacts.sh 0

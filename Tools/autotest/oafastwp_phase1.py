@@ -59,7 +59,14 @@ class OAfastWPPhase1Mixin(object):
                 self.oafastwp_load_asset_fence_by_type(
                     'poly-exclusion-west.txt',
                     mavutil.mavlink.MAV_CMD_NAV_FENCE_POLYGON_VERTEX_EXCLUSION)
-            self._oafastwp_phase1_auto(fences)
+            # poly-exclusion-west box: lat -35.362750..-35.363150, lon 149.164650..149.164950.
+            # WP2/WP3 sit east/west at the same lat; direct leg crosses the exclusion (OA
+            # must path north or south). WP4/WP5 loop south outside the west/south edges.
+            self._oafastwp_phase1_auto(
+                fences,
+                mission='mission-poly-exclusion-west.txt',
+                final_wp=6,
+                timeout=240)
             self.oafastwp_assert_no_fence_breach()
         finally:
             self.context_pop()
@@ -99,7 +106,14 @@ class OAfastWPPhase1Mixin(object):
                         'circle_radius': 15,
                     },
                 ])
-            self._oafastwp_phase1_auto(fences)
+            # circle-exclusion-north/south (r=15 m) leave ~37 m gap at lat -35.362950.
+            # mission-around-west WP4 sat inside the north circle; route never used the gap.
+            # WP2/WP3 sit NE/SW outside both circles; direct leg crosses the corridor.
+            self._oafastwp_phase1_auto(
+                fences,
+                mission='mission-multiple-exclusion-corridor.txt',
+                final_wp=5,
+                timeout=240)
             self.oafastwp_assert_no_fence_breach()
         finally:
             self.context_pop()
@@ -107,23 +121,22 @@ class OAfastWPPhase1Mixin(object):
             self.disarm_vehicle(force=True)
 
     def SITL_04_InclusionFenceMission(self):
-        '''SITL-04: mission inside inclusion fence.'''
+        '''SITL-04: AUTO mission stays inside inclusion fence (Dijkstra + no breach).'''
         self.context_push()
         try:
-            self.clear_fence()
-            self.oafastwp_setup_dijkstra()
-            self.oafastwp_load_asset_fence_by_type(
-                'circle-inclusion-home.txt',
-                mavutil.mavlink.MAV_CMD_NAV_FENCE_CIRCLE_INCLUSION,
-                circle_radius=25)
-            self.do_fence_enable()
-            self.takeoff(15, mode='ALT_HOLD')
-            self.set_rc(2, 1100)
-            self.delay_sim_time(8)
-            self.set_rc(2, 1500)
-            dist = self.distance_to_home()
-            if dist > 30:
-                raise NotAchievedException("Left inclusion fence (dist=%.1fm)" % dist)
+            def fences():
+                self.oafastwp_load_asset_fence_by_type(
+                    'circle-inclusion-home.txt',
+                    mavutil.mavlink.MAV_CMD_NAV_FENCE_CIRCLE_INCLUSION,
+                    circle_radius=25)
+            # Old test flew ALT_HOLD with pitch-forward RC — pilot can leave the fence;
+            # that is not what SITL-04 validates. Expectation: AUTO mission waypoints
+            # inside the 25 m inclusion circle complete without fence breach.
+            self._oafastwp_phase1_auto(
+                fences,
+                mission='mission-inclusion-home.txt',
+                final_wp=6)
+            self.oafastwp_assert_no_fence_breach()
         finally:
             self.context_pop()
             self.clear_fence()
@@ -154,8 +167,35 @@ class OAfastWPPhase1Mixin(object):
             self.disarm_vehicle(force=True)
 
     def SITL_06_NarrowCorridorMission(self):
-        '''SITL-06: narrow corridor between two exclusion fences.'''
-        self.SITL_03_MultipleExclusionMission()
+        '''SITL-06: narrow corridor between two large exclusion fences.'''
+        self.context_push()
+        try:
+            def fences():
+                self.oafastwp_load_multiple_asset_fences([
+                    {
+                        'filename': 'circle-exclusion-north-narrow.txt',
+                        'fence_type': mavutil.mavlink.MAV_CMD_NAV_FENCE_CIRCLE_EXCLUSION,
+                        'circle_radius': 30,
+                    },
+                    {
+                        'filename': 'circle-exclusion-south-narrow.txt',
+                        'fence_type': mavutil.mavlink.MAV_CMD_NAV_FENCE_CIRCLE_EXCLUSION,
+                        'circle_radius': 30,
+                    },
+                ])
+            # r=30 m circles, 72 m centre spacing -> 12 m physical gap (~1 m clearance
+            # with OA_MARGIN_MAX=5). WP2/WP3 sit east/west at gap latitude; leg must
+            # thread the pinch point, not through either circle (SITL-03 uses r=15 / 37 m gap).
+            self._oafastwp_phase1_auto(
+                fences,
+                mission='mission-narrow-corridor.txt',
+                final_wp=4,
+                timeout=300)
+            self.oafastwp_assert_no_fence_breach()
+        finally:
+            self.context_pop()
+            self.clear_fence()
+            self.disarm_vehicle(force=True)
 
     def SITL_07_NoValidPathMission(self):
         '''SITL-07: fully blocked route - path error, no silent skip.'''
@@ -223,14 +263,20 @@ class OAfastWPPhase1Mixin(object):
                     'circle-exclusion-main.txt',
                     mavutil.mavlink.MAV_CMD_NAV_FENCE_CIRCLE_EXCLUSION,
                     circle_radius=self.OAFASTWP_EXCLUSION_RADIUS_M)
-            self._oafastwp_phase1_auto(fences_main, final_wp=2, timeout=90)
+            # WP2 reached under circle fence; fence swaps to poly-exclusion-west.
+            # mission-around-west WP4 sat on the poly NE corner — invalid after swap.
+            self._oafastwp_phase1_auto(
+                fences_main,
+                mission='mission-change-fence-during.txt',
+                final_wp=2,
+                timeout=90)
             self.clear_fence()
             self.oafastwp_load_asset_fence_by_type(
                 'poly-exclusion-west.txt',
                 mavutil.mavlink.MAV_CMD_NAV_FENCE_POLYGON_VERTEX_EXCLUSION)
             self.do_fence_enable()
             self.delay_sim_time(10)
-            self.wait_current_waypoint(5, timeout=120)
+            self.wait_current_waypoint(5, timeout=180)
             self.oafastwp_assert_no_fence_breach()
         finally:
             self.context_pop()

@@ -7226,15 +7226,24 @@ Also, ignores heartbeats not from our target system'''
         util.run_cmd('/bin/rm -f %s' % util.reltopdir("terrain/*.DAT"))
 
     def check_logs(self, name):
-        '''called to move relevant log files from our working directory to the
-        buildlogs directory'''
+        '''Move/copy telemetry and binary logs into buildlogs (pass or fail).'''
         to_dir = self.logs_dir
+        moved_tlog = False
         # move telemetry log files
         for log in glob.glob("autotest-*.tlog"):
             bname = os.path.basename(log)
             newname = os.path.join(to_dir, "%s-%s-%s" % (self.log_name(), name, bname))
             print("Renaming %s to %s" % (log, newname))
             shutil.move(log, newname)
+            moved_tlog = True
+        # MAVProxy log (WSL often cannot hard-link; may be only tlog on PASS)
+        if not moved_tlog and getattr(self, 'logfile', None) and os.path.isfile(self.logfile):
+            suffix = os.path.basename(self.logfile)
+            if not suffix.endswith('.tlog'):
+                suffix = 'mavproxy.tlog'
+            newname = os.path.join(to_dir, "%s-%s-autotest-%s" % (self.log_name(), name, suffix))
+            print("Copying %s to %s" % (self.logfile, newname))
+            shutil.copy2(self.logfile, newname)
         # move binary log files
         for log in sorted(self.bin_logs()):
             bname = os.path.basename(log)
@@ -7430,13 +7439,9 @@ Also, ignores heartbeats not from our target system'''
                           (str(self.mav.message_hooks), str(start_message_hooks)))
             passed = False
 
-        if passed:
-#            self.remove_bin_logs() # can't do this as one of the binlogs is probably open for writing by the SITL process.  If we force a rotate before running tests then we can do this.  # noqa
-            pass
-        else:
-            if self.logs_dir is not None:
-                # stash the binary logs and corefiles away for later analysis
-                self.check_logs(name)
+        if self.logs_dir is not None:
+            # Keep tlog/BIN for campaign evidence on pass and fail.
+            self.check_logs(name)
 
         if passed:
             self.progress('PASSED: "%s"' % prettyname)
