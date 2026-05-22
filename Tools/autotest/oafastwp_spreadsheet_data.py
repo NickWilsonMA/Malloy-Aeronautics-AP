@@ -123,7 +123,7 @@ PHASE_INFO = [
             'RTL through blocked path, fast-waypoint AUTO mission, three-point dogleg smoothing, '
             'GUIDED destination inside exclusion rejected, mode change at breach-escape stand-off.'
         ),
-        'when': 'After Phase 1 — confirms fast-WP integration before breach-escape acceptance.',
+        'when': 'Optional — only if you split autotests into separate gates (after Phase 1).',
         'script': campaign.RUN_TESTS_SCRIPT + ' 2',
         'autotest': 'test.CopterTestsOAfastWPPhase2',
         'worksheet': PHASE_SHEET_NAMES[2],
@@ -139,7 +139,7 @@ PHASE_INFO = [
             'automatic RTL hand-off after escape, no pendulum re-entry, mission WP inside exclusion, '
             'repeated breach/RTL cycles, and clean release GCS messaging (no debug OADJ text).'
         ),
-        'when': 'After Phase 2 — sign-off gate for new breach-escape behaviour.',
+        'when': 'Optional — only if you split autotests into separate gates (after Phase 1 or 2).',
         'script': campaign.RUN_TESTS_SCRIPT + ' 3',
         'autotest': 'test.CopterTestsOAfastWPPhase3',
         'worksheet': PHASE_SHEET_NAMES[3],
@@ -280,9 +280,10 @@ def _write_intro_sheet(wb, active_phases):
     ws.merge_cells('A4:I4')
     ws['A4'] = (
         'This workbook records unattended ArduCopter SITL autotest results for firmware %s. '
-        'All evidence for this campaign lives under docs/%s/ (logs, visual evidence, reports). '
+        'Campaign logs live under docs/%s/Phase<N>/logs/. '
         'Phase 0 is the generic new-firmware regression gate (P0-01..22) — run on every update. '
-        'Additional phase worksheets are added when validating feature-specific behaviour.'
+        'Register each test (ID, case, setup, expected result) in oafastwp_spreadsheet_data.py before '
+        'implementing autotest code; add Phase 1+ worksheets when validating feature behaviour.'
         % (FIRMWARE_VERSION, campaign.CAMPAIGN_ID)
     )
     ws['A4'].font = body_font
@@ -342,11 +343,14 @@ def _write_intro_sheet(wb, active_phases):
     ws.merge_cells('A%d:I%d' % (row, row))
     ws.cell(row, 1, (
         '0. New firmware:         update THISFIRMWARE in ArduCopter/version.h, then %s\n'
-        '1. Run autotests:        %s <phase> [TestName] [--skip-build]\n'
-        '2. Update spreadsheet:   %s <phase>\n'
-        'Add later phases:        %s <1|2|3>'
-        % (campaign.RESET_SCRIPT, campaign.RUN_TESTS_SCRIPT,
-           campaign.GENERATE_ARTIFACTS_SCRIPT, campaign.ADD_PHASE_SCRIPT)
+        '1. Register tests:       add Test ID, case, setup, expected result to oafastwp_spreadsheet_data.py; '
+        'reset campaign or %s <phase>\n'
+        '2. Implement autotest:   oafastwp_phase0.py / oafastwp_phase1.py / arducopter.py (Phases 2–3 optional)\n'
+        '3. Run autotests:        %s <phase> [TestName] [--skip-build]\n'
+        '4. Update spreadsheet:   %s <phase>\n'
+        'On FAIL: inspect .tlog in Phase<N>/logs/ — autotest issue vs firmware bug.'
+        % (campaign.RESET_SCRIPT, campaign.ADD_PHASE_SCRIPT, campaign.RUN_TESTS_SCRIPT,
+           campaign.GENERATE_ARTIFACTS_SCRIPT)
     )).font = body_font
     ws.cell(row, 1).alignment = wrap
 

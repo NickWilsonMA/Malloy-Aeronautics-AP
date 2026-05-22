@@ -7,9 +7,7 @@ Custom ArduPilot firmware for Malloy Aeronautics vehicles. This repository track
 ### What we changed (high level)
 
 - **Obstacle avoidance (OA) / Dijkstra path planner** — fence-aware routing for AUTO, GUIDED (with `GUID_OPTIONS`), and RTL.
-- **OA fast waypoints** — smoother mission legs through Dijkstra path points when `OA_OPTIONS` fast-WP bit is set.
-- **Fence breach escape vector** — shortest escape from exclusion breach, automatic RTL hand-off, repeated breach cycles (see branch `OA-fastWP-fenceEscapeVector`).
-- **SITL validation harness** — phased unattended autotests (Phase 0 firmware regression → feature phases) with logs under `docs/<THISFIRMWARE>/` and a campaign spreadsheet.
+- **SITL validation harness** — phased unattended autotests with logs under `docs/<THISFIRMWARE>/` and a campaign spreadsheet.
 
 Upstream ArduPilot documentation still applies for general build/dev topics: [ardupilot.org/dev](https://ardupilot.org/dev/).
 
@@ -17,7 +15,7 @@ Upstream ArduPilot documentation still applies for general build/dev topics: [ar
 
 ## Firmware update workflow
 
-Every feature firmware update follows the same process. Example: **`OA-fastWP-fenceEscapeVector`** with `THISFIRMWARE` **`MA_COPTER-V4.3.0.16-OA-fastWP-fenceEscapeVector`**.
+Every feature firmware update follows the same process on **`MA-4.3.0.X`**.
 
 ### 1. Create a feature branch
 
@@ -25,11 +23,11 @@ On GitHub (or locally):
 
 1. Go to **Branches → New branch**
 2. **Source branch:** `MA-4.3.0.X`
-3. **Branch name:** short feature name, e.g. `OA-fastWP-fenceEscapeVector` (must match the suffix you will use in `version.h`)
+3. **Branch name:** short feature name (must match the suffix you will use in `version.h`), e.g. `my-feature-name`
 
 ```bash
 git fetch origin
-git checkout -b OA-fastWP-fenceEscapeVector origin/MA-4.3.0.X
+git checkout -b my-feature-name origin/MA-4.3.0.X
 ```
 
 ### 2. Bump `ArduCopter/version.h` (first commit on the branch)
@@ -37,7 +35,7 @@ git checkout -b OA-fastWP-fenceEscapeVector origin/MA-4.3.0.X
 Edit `THISFIRMWARE` **before** starting code changes. Format:
 
 ```c
-#define THISFIRMWARE "MA_COPTER-V4.3.0.16-OA-fastWP-fenceEscapeVector"
+#define THISFIRMWARE "MA_COPTER-V4.3.0.16-my-feature-name"
 ```
 
 - Increment the **build number** (`.16`, `.17`, …) for each new firmware update.
@@ -69,10 +67,36 @@ docs/<THISFIRMWARE>/
     full_<timestamp>/<TestName>/     (.txt, .tlog, .BIN, run_results.json)
     rerun_<timestamp>-<TestName>/    (single-test re-runs)
     run_results.json                 (aggregate of all reruns)
-  Phase1/logs/ … Phase3/logs/      (when those phases are added)
+  Phase1/logs/ …                     (when additional phases are added)
   <THISFIRMWARE>.xlsx              (Intro + phase tabs; columns E–G = Pass/Fail, Re-runs, Log ref)
   README.txt
 ```
+
+#### Register tests in the spreadsheet first
+
+**Before** implementing autotest code, register each new test in `Tools/autotest/oafastwp_spreadsheet_data.py`:
+
+1. **Test ID** — `P0-xx` (Phase 0 regression) or `SITL-xx` (feature SITL)
+2. **Test case** — short title
+3. **Setup / Action** — what the scenario does
+4. **Expected result** — pass criteria
+
+Add the row to `P0_ROWS` (Phase 0) or `SITL_ROWS` (feature tests). Re-run campaign init or `add_firmware_SITL_validation_phase.sh` so the worksheet shows columns A–D populated (Pass/Fail columns E–G stay empty until you run tests).
+
+#### Then add the autotest in the repo
+
+| Phase | Purpose | Where to implement |
+|-------|---------|-------------------|
+| **0** | Generic firmware regression on every update (`P0-01`..`P0-22`) | `Tools/autotest/oafastwp_phase0.py` (often delegates to upstream tests in `arducopter.py`) |
+| **1** | Feature SITL regression (`SITL-xx`) | `Tools/autotest/oafastwp_phase1.py` and mission/fence assets under `Tools/autotest/ArduCopter_Tests/OAfastWP_Regression_Assets/` |
+| **2–3** | **Optional** — only if you need to **split** autotests into separate run gates | `Tools/autotest/arducopter.py` (`OAfastWP_*` methods) and register in the phase runner |
+
+Use **Phase 2 and Phase 3 only when you deliberately want separate test runs** (for example a broad Phase 1 matrix, then a smaller acceptance gate). If all feature tests can run together, keep them in **Phase 1** — extra phases are not required.
+
+After the autotest exists, also update in `oafastwp_spreadsheet_data.py`:
+
+- `PHASE_AUTOTEST` mapping (Test ID → autotest method name)
+- Phase test list used for log collection (`Tools/autotest/generate_oafastwp_visual_evidence.py`)
 
 **Run tests** (builds SITL on first full phase run; use `--skip-build` for reruns):
 
@@ -96,20 +120,11 @@ Do not treat a red autotest as a firmware failure (or vice versa) without lookin
 ./Tools/autotest/generate_firmware_SITL_validation_campaign_artifacts.sh 0
 ```
 
-This refreshes **all phase tabs** that have logs on disk (columns **E** Pass/Fail, **F** Re-runs to pass, **G** Log ref). It does **not** generate HTML reports or visual evidence folders — logs + spreadsheet are the deliverables.
+This refreshes phase tabs that have logs on disk (columns **E** Pass/Fail, **F** Re-runs to pass, **G** Log ref). Deliverables are **logs + spreadsheet only**.
 
-Repeat **run → triage → fix → re-run → update spreadsheet** until the required phases are all PASS.
+Repeat **register → implement → run → triage → fix → re-run → update spreadsheet** until required phases are all PASS.
 
-#### Phase overview (this branch)
-
-| Phase | Scope | Autotest module | Count |
-|-------|--------|-----------------|-------|
-| 0 | Firmware regression (P0-01..22) | `Tools/autotest/oafastwp_phase0.py` | 22 |
-| 1 | Dijkstra fence regression (SITL-01..23) | `Tools/autotest/oafastwp_phase1.py` | 23 |
-| 2 | Fast-WP integration (SITL-14,17,23,29,32) | tests in `Tools/autotest/arducopter.py` (`OAfastWP_*`) | 5 |
-| 3 | Breach escape gate (SITL-25..31 excl. 29) | tests in `Tools/autotest/arducopter.py` | 6 |
-
-Add Phase 1–3 tabs to the workbook when Phase 0 passes:
+Add feature phase tabs when Phase 0 passes:
 
 ```bash
 ./Tools/autotest/add_firmware_SITL_validation_phase.sh 1
@@ -117,23 +132,7 @@ Add Phase 1–3 tabs to the workbook when Phase 0 passes:
 ./Tools/autotest/generate_firmware_SITL_validation_campaign_artifacts.sh 1
 ```
 
-Same pattern for phases 2 and 3.
-
-#### Adding new tests in a later phase
-
-1. **Implement the autotest**
-   - Phase 0: add a method to `Tools/autotest/oafastwp_phase0.py` (often delegating to an upstream test in `arducopter.py`).
-   - Phase 1: add a method to `Tools/autotest/oafastwp_phase1.py` and any mission/fence assets under `Tools/autotest/ArduCopter_Tests/OAfastWP_Regression_Assets/`.
-   - Phases 2–3: add `OAfastWP_*` methods on `AutoTestCopter` in `Tools/autotest/arducopter.py` and register them in the phase runner / `autotest.py` if needed.
-
-2. **Register the test ID** in `Tools/autotest/oafastwp_spreadsheet_data.py`:
-   - Row data (`P0_ROWS`, `PHASE1_ROWS`, …)
-   - `PHASE_AUTOTEST` mapping (spreadsheet Test ID → autotest method name)
-   - Phase test list in `Tools/autotest/generate_oafastwp_visual_evidence.py` (`PHASE0_TESTS`, …) used for log collection
-
-3. **Add a worksheet row** by re-running `add_firmware_SITL_validation_phase.sh` for a new phase tab, or edit the generated `.xlsx` template via `oafastwp_spreadsheet_data.py` and reset the campaign if the Intro template must change.
-
-4. **Run and record** — execute via `run_firmware_SITL_validation_campaign_tests.sh`, then refresh the spreadsheet so the new row gets Pass/Fail and log ref.
+Add Phase 2 or 3 only when you need a separate gate; same commands with phase `2` or `3`.
 
 Mission/fence assets live beside the tests; keep waypoints **outside** exclusion/inclusion boundaries (with OA margin) unless the scenario deliberately tests breach or rejection.
 
@@ -155,6 +154,6 @@ When all required phases pass:
 |------|---------|
 | Validate version + branch | `python3 Tools/autotest/firmware_SITL_validation_campaign.py validate` |
 | Init / reset campaign | `./Tools/autotest/reset_firmware_SITL_validation_campaign.sh` |
+| Add phase worksheet | `./Tools/autotest/add_firmware_SITL_validation_phase.sh <1\|2\|3>` |
 | Run autotests | `./Tools/autotest/run_firmware_SITL_validation_campaign_tests.sh <0\|1\|2\|3> [TestName] [--skip-build]` |
 | Update spreadsheet | `./Tools/autotest/generate_firmware_SITL_validation_campaign_artifacts.sh <phase>` |
-| Add phase worksheet | `./Tools/autotest/add_firmware_SITL_validation_phase.sh <1\|2\|3>` |

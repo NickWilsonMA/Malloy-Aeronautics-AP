@@ -32,8 +32,11 @@ Firmware SITL validation campaign — ${CAMPAIGN_ID}
 Name source: ArduCopter/version.h THISFIRMWARE (must match checked-out git branch suffix).
 
 Workflow:
-  1. Run autotests:        ./Tools/autotest/run_firmware_SITL_validation_campaign_tests.sh <phase> [TestName] [--skip-build]
-  2. Update spreadsheet:   ./Tools/autotest/generate_firmware_SITL_validation_campaign_artifacts.sh <phase>
+  1. Register tests:       add Test ID, case, setup, expected result to Tools/autotest/oafastwp_spreadsheet_data.py
+  2. Implement autotest:   Tools/autotest/oafastwp_phase0.py / oafastwp_phase1.py (Phases 2–3 optional)
+  3. Run autotests:        ./Tools/autotest/run_firmware_SITL_validation_campaign_tests.sh <phase> [TestName] [--skip-build]
+  4. Update spreadsheet:   ./Tools/autotest/generate_firmware_SITL_validation_campaign_artifacts.sh <phase>
+  On FAIL: open .tlog in Phase<N>/logs/ — autotest issue vs firmware bug.
 
 Spreadsheet columns: E=Pass/Fail, F=Re-runs to pass, G=Log ref (from all full + rerun folders).
 
