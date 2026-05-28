@@ -33,6 +33,8 @@
 
 #define AP_AVOIDANCE_ESCAPE_TIME_SEC                        2       // vehicle runs from thread for 2 seconds
 
+#define MAX_OBSTACLE_LOCATION_DELTA							1.0f	// used to determine obstacle persistence
+
 class AP_Avoidance {
 public:
 
@@ -189,6 +191,10 @@ private:
     uint8_t _obstacle_count;
     int8_t _current_most_serious_threat;
     MAV_COLLISION_ACTION _latest_action = MAV_COLLISION_ACTION_NONE;
+
+	// for keeping track of the most recently encountered threat that caused panic
+	uint32_t _current_most_serious_threat_id;
+	Location _current_most_serious_threat_location;
 
     // external references
     class AP_ADSB &_adsb;

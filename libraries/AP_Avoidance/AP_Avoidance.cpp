@@ -483,6 +483,21 @@ void AP_Avoidance::check_for_threats()
         update_threat_level(my_loc, my_vel, obstacle);
         debug("   threat-level=%d", obstacle.threat_level);
 
+		// We perform another check using the last known position of this obstacle
+		// and see if it's still there, if it is, we bring back the previous threat level
+		if (_current_most_serious_threat_id == _obstacles[i].src_id)
+		{
+			float obstacle_location_delta =
+				_obstacles[i]._location.get_distance(_current_most_serious_threat_location);
+			if (obstacle_location_delta < MAX_OBSTACLE_LOCATION_DELTA)
+			{
+				if (_obstacles[i].threat_level != MAV_COLLISION_THREAT_LEVEL_HIGH)
+				{
+					_obstacles[i].threat_level = MAV_COLLISION_THREAT_LEVEL_HIGH;
+				}
+			}
+		}
+
         // ignore any really old data:
         if (obstacle_age > MAX_OBSTACLE_AGE_MS) {
             // shrink list if this is the last entry:
@@ -498,6 +513,13 @@ void AP_Avoidance::check_for_threats()
     }
     if (_current_most_serious_threat != -1) {
         debug("Current most serious threat: %d level=%d", _current_most_serious_threat, _obstacles[_current_most_serious_threat].threat_level);
+
+		// caching id and location of obstacle causing high threat level
+		if (_obstacles[_current_most_serious_threat].threat_level == MAV_COLLISION_THREAT_LEVEL_HIGH)
+		{
+			_current_most_serious_threat_id = _obstacles[_current_most_serious_threat].src_id;
+			_current_most_serious_threat_location = _obstacles[_current_most_serious_threat]._location;
+		}
     }
 }
 
