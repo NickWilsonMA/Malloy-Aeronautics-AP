@@ -25,7 +25,7 @@ public:
     // returns true if the subsystem is enabled
     bool enabled() const { return _enabled; }
 
-    // returns true if beacon data is fresh (within TETH_TIMEOUT ms)
+    // returns true if beacon data is fresh (within TETH_BCN_TIMEOUT ms)
     bool is_healthy() const;
 
     // get beacon position — returns false if unhealthy
@@ -36,6 +36,9 @@ public:
 
     // get beacon heading in degrees (0=north) — returns false if unhealthy
     bool get_heading_deg(float &heading_deg) const;
+
+    // enable or disable tether at runtime (mirrors TETH_ENABLE param without saving)
+    void set_enabled(bool enable) { _enabled.set(enable ? 1 : 0); }
 
     // change active beacon sysid at runtime (0 = auto-latch first seen)
     void set_target_sysid(uint8_t sysid) { _target_sysid.set(sysid); _auto_sysid = false; }

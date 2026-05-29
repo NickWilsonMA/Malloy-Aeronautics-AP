@@ -44,6 +44,10 @@ bool ModeGuided::init(bool ignore_checks)
     // clear pause state when entering guided mode
     _paused = false;
 
+#if MODE_TETHER_GUIDED_ENABLED == ENABLED
+    _tether_init();
+#endif
+
     return true;
 }
 
@@ -56,6 +60,18 @@ void ModeGuided::run()
         pause_control_run();
         return;
     }
+
+#if MODE_TETHER_GUIDED_ENABLED == ENABLED
+    if (g2.tether.enabled()) {
+        if (_tether.new_cmd_pending) {
+            _tether.new_cmd_pending = false;
+            _tether_try_capture_offset();
+        }
+        if (_tether.offset_valid) {
+            _tether_update_destination();
+        }
+    }
+#endif
 
     // call the correct auto controller
     switch (guided_mode) {
@@ -363,8 +379,6 @@ bool ModeGuided::set_destination(const Vector3f& destination, bool use_yaw, floa
         // no need to check return status because terrain data is not used
         wp_nav->set_wp_destination(destination, terrain_alt);
 
-        // Keep guided_pos_target_cm in sync so get_target_pos() always reflects
-        // the last commanded destination (needed by ModeTetherGuided::_try_capture_offset).
         guided_pos_target_cm = destination.topostype();
         guided_pos_terrain_alt = terrain_alt;
 
@@ -437,6 +451,16 @@ bool ModeGuided::get_wp(Location& destination) const
 // or if the fence is enabled and guided waypoint is outside the fence
 bool ModeGuided::set_destination(const Location& dest_loc, bool use_yaw, float yaw_cd, bool use_yaw_rate, float yaw_rate_cds, bool relative_yaw)
 {
+#if MODE_TETHER_GUIDED_ENABLED == ENABLED
+    if (g2.tether.enabled()) {
+        Vector3f dest_neu_cm;
+        if (dest_loc.get_vector_from_origin_NEU(dest_neu_cm)) {
+            _tether.pending_cmd_neu_cm = dest_neu_cm;
+            _tether.new_cmd_pending    = true;
+        }
+    }
+#endif
+
 #if AP_FENCE_ENABLED
     // reject destination outside the fence.
     // Note: there is a danger that a target specified as a terrain altitude might not be checked if the conversion to alt-above-home fails
@@ -460,8 +484,6 @@ bool ModeGuided::set_destination(const Location& dest_loc, bool use_yaw, float y
             return false;
         }
 
-        // Keep guided_pos_target_cm in sync so get_target_pos() always reflects
-        // the last commanded destination (needed by ModeTetherGuided::_try_capture_offset).
         Vector3f dest_neu_cm;
         if (dest_loc.get_vector_from_origin_NEU(dest_neu_cm)) {
             guided_pos_target_cm  = dest_neu_cm.topostype();
@@ -1255,5 +1277,109 @@ bool ModeGuided::resume()
     _paused = false;
     return true;
 }
+
+// -----------------------------------------------------------------------
+// Tether overlay helpers — compiled only when AP_Tether is present.
+// Logic mirrors the former ModeTetherGuided, now embedded here so that
+// QGC can send normal guided commands without switching flight modes.
+// -----------------------------------------------------------------------
+#if MODE_TETHER_GUIDED_ENABLED == ENABLED
+
+static constexpr float TETHER_GUIDED_UPDATE_DIST_CM = 10.0f;
+
+void ModeGuided::_tether_init()
+{
+    _tether.offset_ne_cm.zero();
+    _tether.target_alt_cm    = 0.0f;
+    _tether.offset_valid     = false;
+    _tether.new_cmd_pending  = false;
+    _tether.pending_cmd_neu_cm.zero();
+    _tether.last_update_neu_cm.zero();
+
+    if (g2.tether.enabled()) {
+        const Vector3f& cur = copter.inertial_nav.get_position_neu_cm();
+        set_destination_posvel(cur, Vector3f(), false, 0.0f, false, 0.0f, false);
+        _tether.last_update_neu_cm = cur;
+    }
+}
+
+void ModeGuided::_tether_try_capture_offset()
+{
+    Location beacon_loc;
+    Vector3f beacon_neu_cm;
+
+    if (g2.tether.is_healthy() &&
+        g2.tether.get_position(beacon_loc) &&
+        beacon_loc.get_vector_from_origin_NEU(beacon_neu_cm)) {
+
+        _tether.offset_ne_cm.x = _tether.pending_cmd_neu_cm.x - beacon_neu_cm.x;
+        _tether.offset_ne_cm.y = _tether.pending_cmd_neu_cm.y - beacon_neu_cm.y;
+        _tether.target_alt_cm  = _tether.pending_cmd_neu_cm.z;
+        _tether.offset_valid   = true;
+
+        // force _tether_update_destination() to fire on this tick
+        _tether.last_update_neu_cm = _tether.pending_cmd_neu_cm +
+                                     Vector3f(TETHER_GUIDED_UPDATE_DIST_CM + 1.0f, 0, 0);
+
+        gcs().send_text(MAV_SEVERITY_INFO,
+                        "Tether: offset captured %.1f,%.1f m",
+                        (double)(_tether.offset_ne_cm.x * 0.01f),
+                        (double)(_tether.offset_ne_cm.y * 0.01f));
+    } else {
+        _tether.offset_valid = false;
+        gcs().send_text(MAV_SEVERITY_WARNING,
+                        "Tether: no beacon - flying to absolute position");
+    }
+}
+
+void ModeGuided::_tether_update_destination()
+{
+    if (!g2.tether.is_healthy()) {
+        // beacon timeout reached — deactivate tether and revert to normal guided
+        _tether.offset_valid = false;
+        gcs().send_text(MAV_SEVERITY_WARNING, "Tether: beacon lost, reverting to normal guided");
+        return;
+    }
+
+    Location beacon_loc;
+    Vector3f beacon_neu_cm;
+    if (!g2.tether.get_position(beacon_loc) ||
+        !beacon_loc.get_vector_from_origin_NEU(beacon_neu_cm)) {
+        return;
+    }
+
+    const Vector3f new_target_neu_cm(
+        beacon_neu_cm.x + _tether.offset_ne_cm.x,
+        beacon_neu_cm.y + _tether.offset_ne_cm.y,
+        _tether.target_alt_cm);
+
+    if ((new_target_neu_cm - _tether.last_update_neu_cm).length_squared() <
+            sq(TETHER_GUIDED_UPDATE_DIST_CM)) {
+        return;
+    }
+
+#if AP_FENCE_ENABLED
+    if (copter.fence.enabled()) {
+        const Location target_loc(new_target_neu_cm.tofloat(),
+                                  Location::AltFrame::ABOVE_ORIGIN);
+        if (!copter.fence.check_destination_within_fence(target_loc)) {
+            return;
+        }
+    }
+#endif
+
+    Vector3f beacon_vel_ned;
+    g2.tether.get_velocity_ned(beacon_vel_ned);
+    const Vector3f vel_feedforward(
+         beacon_vel_ned.x * 100.0f,
+         beacon_vel_ned.y * 100.0f,
+         0.0f);
+
+    set_destination_posvel(new_target_neu_cm, vel_feedforward,
+                           false, 0.0f, false, 0.0f, false);
+    _tether.last_update_neu_cm = new_target_neu_cm;
+}
+
+#endif  // MODE_TETHER_GUIDED_ENABLED
 
 #endif

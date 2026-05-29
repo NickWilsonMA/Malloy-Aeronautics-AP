@@ -21,20 +21,20 @@ const AP_Param::GroupInfo AP_Tether::var_info[] = {
     // @User: Standard
     AP_GROUPINFO_FLAGS("ENABLE", 1, AP_Tether, _enabled, 0, AP_PARAM_FLAG_ENABLE),
 
-    // @Param: SYSID
+    // @Param: BCN_SYSID
     // @DisplayName: Beacon MAVLink system ID
     // @Description: MAVLink system ID of the beacon to track. Set to 0 to auto-latch on to the first GLOBAL_POSITION_INT message seen. Change this value in flight to switch to a different beacon.
     // @Range: 0 255
     // @User: Standard
-    AP_GROUPINFO("SYSID", 2, AP_Tether, _target_sysid, 0),
+    AP_GROUPINFO("BCN_SYSID", 2, AP_Tether, _target_sysid, 0),
 
-    // @Param: TIMEOUT
+    // @Param: BCN_TIMEOUT
     // @DisplayName: Beacon data timeout
     // @Description: Time in milliseconds after which beacon data is considered stale if no new message has been received.
     // @Range: 500 10000
     // @Units: ms
     // @User: Standard
-    AP_GROUPINFO("TIMEOUT", 3, AP_Tether, _stale_ms, AP_TETHER_STALE_MS_DEFAULT),
+    AP_GROUPINFO("BCN_TIMEOUT", 3, AP_Tether, _stale_ms, AP_TETHER_STALE_MS_DEFAULT),
 
     AP_GROUPEND
 };

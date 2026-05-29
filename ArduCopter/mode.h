@@ -1060,6 +1060,23 @@ private:
 
     // guided mode is paused or not
     bool _paused;
+
+#if MODE_TETHER_GUIDED_ENABLED == ENABLED
+    // Tether overlay state — active when TETH_ENABLE=1 and beacon is healthy.
+    // Guided commands are interpreted as offsets relative to the beacon.
+    struct {
+        Vector2f offset_ne_cm;        // NE offset (cm) from beacon to commanded target
+        float    target_alt_cm;       // altitude of commanded target (cm above EKF origin)
+        bool     offset_valid;        // true once an offset has been captured
+        bool     new_cmd_pending;     // set when a new Location-based GCS command arrives
+        Vector3f pending_cmd_neu_cm;  // NEU cm position from the most recent GCS command
+        Vector3f last_update_neu_cm;  // last NEU cm position sent to posvelaccel controller
+    } _tether;
+
+    void _tether_init();
+    void _tether_try_capture_offset();
+    void _tether_update_destination();
+#endif  // MODE_TETHER_GUIDED_ENABLED
 };
 
 
@@ -1906,49 +1923,12 @@ public:
     Number mode_number() const override { return Number::TETHER_GUIDED; }
 
     bool init(bool ignore_checks) override;
-    void run() override;
-
-    // Respects GUID_OPTIONS bit 6 (WPNavUsedForPosControl) exactly like
-    // standard Guided — set GUID_OPTIONS=64 to enable WPNav + OA/fence.
-    // When not set, uses PosVelAccel with beacon velocity feedforward.
-    // (Inherited from ModeGuided — no override needed.)
-
-    // Bring Vector3f overload into scope (otherwise the Location override hides it).
-    using ModeGuided::set_destination;
-
-    // Intercept Location-based GCS commands to capture offset and flag pending capture.
-    bool set_destination(const Location& dest_loc, bool use_yaw = false, float yaw_cd = 0.0f,
-                         bool use_yaw_rate = false, float yaw_rate_cds = 0.0f,
-                         bool yaw_relative = false) override;
+    // run() and set_destination() fully handled by ModeGuided base class.
 
 protected:
     const char *name()  const override { return "TETH_GUID"; }
     const char *name4() const override { return "TGUD"; }
 
-private:
-    // NE offset (cm, EKF-origin frame) from beacon to guided target,
-    // captured at the moment a GCS command arrives
-    Vector2f _offset_ne_cm;
 
-    // altitude of guided target (cm above EKF origin, NEU Z-up)
-    float    _target_alt_cm;
-
-    // true once an offset has been captured from a live GCS command
-    bool     _offset_valid;
-
-    // set by set_destination(Location) when a new GCS command arrives;
-    // cleared immediately after _try_capture_offset() consumes it
-    bool     _new_cmd_pending;
-
-    // NEU cm position from the most recent GCS command (set alongside flag)
-    Vector3f _pending_cmd_neu_cm;
-
-    // last NEU cm position fed to set_destination_posvel() — used to gate
-    // how often we update (avoids thrashing the pos controller)
-    Vector3f _last_update_neu_cm;
-
-    // helpers
-    void _try_capture_offset();
-    void _update_destination();
 };
 #endif  // MODE_TETHER_GUIDED_ENABLED

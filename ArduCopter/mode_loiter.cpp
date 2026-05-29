@@ -165,6 +165,41 @@ void ModeLoiter::run()
         // set motors to full range
         motors->set_desired_spool_state(AP_Motors::DesiredSpoolState::THROTTLE_UNLIMITED);
 
+#if MODE_TETHER_LOITER_ENABLED == ENABLED
+        // Tether overlay: advance the loiter anchor at beacon velocity so that
+        // centre-stick means zero velocity relative to the beacon.
+        if (g2.tether.enabled()) {
+            Vector3f beacon_vel_ned;
+            if (g2.tether.is_healthy() && g2.tether.get_velocity_ned(beacon_vel_ned)) {
+                const float vn_cms = beacon_vel_ned.x * 100.0f;
+                const float ve_cms = beacon_vel_ned.y * 100.0f;
+
+                Vector3p pos = pos_control->get_pos_target_cm();
+                pos.x += vn_cms * G_Dt;
+                pos.y += ve_cms * G_Dt;
+
+                // gentle position correction toward beacon to cancel drift
+                static constexpr float TETHER_LOITER_CORR_MAX_CMS = 50.0f;
+                Location beacon_loc;
+                if (g2.tether.get_position(beacon_loc)) {
+                    Vector3f beacon_neu_cm;
+                    if (beacon_loc.get_vector_from_origin_NEU(beacon_neu_cm)) {
+                        Vector2f err(beacon_neu_cm.x - (float)pos.x,
+                                     beacon_neu_cm.y - (float)pos.y);
+                        const float max_step = TETHER_LOITER_CORR_MAX_CMS * G_Dt;
+                        Vector2f step = err * 0.05f;
+                        if (step.length() > max_step) {
+                            step = step.normalized() * max_step;
+                        }
+                        pos.x += step.x;
+                        pos.y += step.y;
+                    }
+                }
+                pos_control->set_pos_target_xy_cm((float)pos.x, (float)pos.y);
+            }
+        }
+#endif  // MODE_TETHER_LOITER_ENABLED
+
 #if PRECISION_LANDING == ENABLED
         bool precision_loiter_old_state = _precision_loiter_active;
         if (do_precision_loiter()) {

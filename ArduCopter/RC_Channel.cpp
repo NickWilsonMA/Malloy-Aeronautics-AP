@@ -121,6 +121,7 @@ void RC_Channel_Copter::init_aux_function(const aux_func_t ch_option, const AuxS
     case AUX_FUNC::AIRMODE:
     case AUX_FUNC::FORCEFLYING:
     case AUX_FUNC::CUSTOM_CONTROLLER:
+    case AUX_FUNC::TETHER_ENABLE:
         run_aux_function(ch_option, ch_flag, AuxFuncTriggerSource::INIT);
         break;
     default:
@@ -616,6 +617,15 @@ bool RC_Channel_Copter::do_aux_function(const aux_func_t ch_option, const AuxSwi
         case AUX_FUNC::CUSTOM_CONTROLLER:
             copter.custom_control.set_custom_controller(ch_flag == AuxSwitchPos::HIGH);
             break;
+#endif
+
+#if MODE_TETHER_GUIDED_ENABLED == ENABLED || MODE_TETHER_LOITER_ENABLED == ENABLED
+        case AUX_FUNC::TETHER_ENABLE: {
+            const bool on = (ch_flag == AuxSwitchPos::HIGH);
+            copter.g2.tether.set_enabled(on);
+            gcs().send_text(MAV_SEVERITY_INFO, "Tether: %s", on ? "enabled" : "disabled");
+            break;
+        }
 #endif
 
     default:
