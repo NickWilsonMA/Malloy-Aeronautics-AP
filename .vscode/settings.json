@@ -37,5 +37,6 @@
         "utility": "cpp",
         "typeinfo": "cpp",
         "condition_variable": "cpp"
-    }
+    },
+    "ardupilot.activeConfiguration": "sitl-copter"
 }

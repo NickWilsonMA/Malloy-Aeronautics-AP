@@ -10,6 +10,9 @@
 #if MODE_FOLLOW_ENABLED == ENABLED
  # include <AP_Follow/AP_Follow.h>
 #endif
+#if MODE_TETHER_LOITER_ENABLED == ENABLED || MODE_TETHER_GUIDED_ENABLED == ENABLED
+ # include <AP_Tether/AP_Tether.h>
+#endif
 
 // Global parameter class.
 //
@@ -582,6 +585,11 @@ public:
 #if MODE_FOLLOW_ENABLED == ENABLED
     // follow
     AP_Follow follow;
+#endif
+
+#if MODE_TETHER_LOITER_ENABLED == ENABLED || MODE_TETHER_GUIDED_ENABLED == ENABLED
+    // tether beacon tracking
+    AP_Tether tether;
 #endif
 
 #ifdef USER_PARAMS_ENABLED

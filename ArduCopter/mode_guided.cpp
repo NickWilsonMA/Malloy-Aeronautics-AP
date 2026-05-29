@@ -363,6 +363,11 @@ bool ModeGuided::set_destination(const Vector3f& destination, bool use_yaw, floa
         // no need to check return status because terrain data is not used
         wp_nav->set_wp_destination(destination, terrain_alt);
 
+        // Keep guided_pos_target_cm in sync so get_target_pos() always reflects
+        // the last commanded destination (needed by ModeTetherGuided::_try_capture_offset).
+        guided_pos_target_cm = destination.topostype();
+        guided_pos_terrain_alt = terrain_alt;
+
         // log target
         copter.Log_Write_Guided_Position_Target(guided_mode, destination, terrain_alt, Vector3f(), Vector3f());
         send_notification = true;
@@ -453,6 +458,14 @@ bool ModeGuided::set_destination(const Location& dest_loc, bool use_yaw, float y
             AP::logger().Write_Error(LogErrorSubsystem::NAVIGATION, LogErrorCode::FAILED_TO_SET_DESTINATION);
             // failure is propagated to GCS with NAK
             return false;
+        }
+
+        // Keep guided_pos_target_cm in sync so get_target_pos() always reflects
+        // the last commanded destination (needed by ModeTetherGuided::_try_capture_offset).
+        Vector3f dest_neu_cm;
+        if (dest_loc.get_vector_from_origin_NEU(dest_neu_cm)) {
+            guided_pos_target_cm  = dest_neu_cm.topostype();
+            guided_pos_terrain_alt = (dest_loc.get_alt_frame() == Location::AltFrame::ABOVE_TERRAIN);
         }
 
         // set yaw state

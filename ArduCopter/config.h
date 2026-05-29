@@ -254,6 +254,18 @@
 #endif
 
 //////////////////////////////////////////////////////////////////////////////
+// TetherLoiter - loiter with anchor drifting at beacon velocity
+#ifndef MODE_TETHER_LOITER_ENABLED
+# define MODE_TETHER_LOITER_ENABLED ENABLED
+#endif
+
+//////////////////////////////////////////////////////////////////////////////
+// TetherGuided - guided mode with destination offset locked to a beacon
+#ifndef MODE_TETHER_GUIDED_ENABLED
+# define MODE_TETHER_GUIDED_ENABLED ENABLED
+#endif
+
+//////////////////////////////////////////////////////////////////////////////
 // Guided mode - control vehicle's position or angles from GCS
 #ifndef MODE_GUIDED_ENABLED
 # define MODE_GUIDED_ENABLED ENABLED

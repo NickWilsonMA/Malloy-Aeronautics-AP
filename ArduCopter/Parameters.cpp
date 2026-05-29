@@ -912,6 +912,12 @@ const AP_Param::GroupInfo ParametersG2::var_info[] = {
     AP_SUBGROUPINFO(follow, "FOLL", 27, ParametersG2, AP_Follow),
 #endif
 
+#if MODE_TETHER_LOITER_ENABLED == ENABLED || MODE_TETHER_GUIDED_ENABLED == ENABLED
+    // @Group: TETH_
+    // @Path: ../libraries/AP_Tether/AP_Tether.cpp
+    AP_SUBGROUPINFO(tether, "TETH_", 59, ParametersG2, AP_Tether),
+#endif
+
 #ifdef USER_PARAMS_ENABLED
     AP_SUBGROUPINFO(user_parameters, "USR", 28, ParametersG2, UserParameters),
 #endif
@@ -1197,6 +1203,9 @@ ParametersG2::ParametersG2(void)
 #endif
 #if MODE_FOLLOW_ENABLED == ENABLED
     ,follow()
+#endif
+#if MODE_TETHER_LOITER_ENABLED == ENABLED || MODE_TETHER_GUIDED_ENABLED == ENABLED
+    ,tether()
 #endif
 #ifdef USER_PARAMS_ENABLED
     ,user_parameters()

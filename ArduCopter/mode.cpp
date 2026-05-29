@@ -175,6 +175,18 @@ Mode *Copter::mode_from_mode_num(const Mode::Number mode)
             break;
 #endif
 
+#if MODE_TETHER_LOITER_ENABLED == ENABLED
+        case Mode::Number::TETHER_LOITER:
+            ret = &mode_tether_loiter;
+            break;
+#endif
+
+#if MODE_TETHER_GUIDED_ENABLED == ENABLED
+        case Mode::Number::TETHER_GUIDED:
+            ret = &mode_tether_guided;
+            break;
+#endif
+
         default:
             break;
     }

@@ -585,6 +585,10 @@ void GCS_MAVLINK_Copter::packetReceived(const mavlink_status_t &status,
     // pass message to follow library
     copter.g2.follow.handle_msg(msg);
 #endif
+#if MODE_TETHER_LOITER_ENABLED == ENABLED || MODE_TETHER_GUIDED_ENABLED == ENABLED
+    // pass message to tether tracking library
+    copter.g2.tether.handle_msg(msg);
+#endif
     GCS_MAVLINK::packetReceived(status, msg);
 }
 
@@ -689,8 +693,14 @@ MAV_RESULT GCS_MAVLINK_Copter::handle_command_int_do_reposition(const mavlink_co
         return MAV_RESULT_DENIED; // failed as the location is not valid
     }
 
+    // Route through the actual active flightmode so that subclasses of ModeGuided
+    // (e.g. ModeTetherGuided) have their use_wpnav_for_position_control() policy respected.
+    ModeGuided* guided_mode_ptr = static_cast<ModeGuided*>(copter.flightmode->in_guided_mode()
+                                                           ? copter.flightmode
+                                                           : static_cast<Mode*>(&copter.mode_guided));
+
     // we need to do this first, as we don't want to change the flight mode unless we can also set the target
-    if (!copter.mode_guided.set_destination(request_location, false, 0, false, 0)) {
+    if (!guided_mode_ptr->set_destination(request_location, false, 0, false, 0)) {
         return MAV_RESULT_FAILED;
     }
 
@@ -1280,7 +1290,9 @@ void GCS_MAVLINK_Copter::handleMessage(const mavlink_message_t &msg)
         } else if (pos_ignore && vel_ignore && !acc_ignore) {
             copter.mode_guided.set_accel(accel_vector, !yaw_ignore, yaw_cd, !yaw_rate_ignore, yaw_rate_cds, yaw_relative);
         } else if (!pos_ignore && vel_ignore && acc_ignore) {
-            copter.mode_guided.set_destination(pos_vector, !yaw_ignore, yaw_cd, !yaw_rate_ignore, yaw_rate_cds, yaw_relative, false);
+            // Route through actual flightmode so subclasses (e.g. ModeTetherGuided)
+            // have their use_wpnav_for_position_control() policy respected.
+            static_cast<ModeGuided*>(copter.flightmode)->set_destination(pos_vector, !yaw_ignore, yaw_cd, !yaw_rate_ignore, yaw_rate_cds, yaw_relative, false);
         } else {
             // input is not valid so stop
             copter.mode_guided.init(true);
@@ -1379,7 +1391,9 @@ void GCS_MAVLINK_Copter::handleMessage(const mavlink_message_t &msg)
         } else if (pos_ignore && vel_ignore && !acc_ignore) {
             copter.mode_guided.set_accel(accel_vector, !yaw_ignore, yaw_cd, !yaw_rate_ignore, yaw_rate_cds);
         } else if (!pos_ignore && vel_ignore && acc_ignore) {
-            copter.mode_guided.set_destination(loc, !yaw_ignore, yaw_cd, !yaw_rate_ignore, yaw_rate_cds);
+            // Route through actual flightmode so subclasses (e.g. ModeTetherGuided)
+            // have their use_wpnav_for_position_control() policy respected.
+            static_cast<ModeGuided*>(copter.flightmode)->set_destination(loc, !yaw_ignore, yaw_cd, !yaw_rate_ignore, yaw_rate_cds);
         } else {
             // input is not valid so stop
             copter.mode_guided.init(true);

@@ -40,6 +40,9 @@ public:
         AUTO_RTL =     27,  // Auto RTL, this is not a true mode, AUTO will report as this mode if entered to perform a DO_LAND_START Landing sequence
         TURTLE =       28,  // Flip over after crash
 
+        TETHER_LOITER = 29, // Loiter with anchor drifting at beacon velocity
+        TETHER_GUIDED = 30, // Guided with destination offset locked to a beacon
+
         // Mode number 127 reserved for the "drone show mode" in the Skybrush
         // fork at https://github.com/skybrush-io/ardupilot
     };
@@ -953,7 +956,7 @@ public:
     void set_angle(const Quaternion &attitude_quat, const Vector3f &ang_vel, float climb_rate_cms_or_thrust, bool use_thrust);
 
     bool set_destination(const Vector3f& destination, bool use_yaw = false, float yaw_cd = 0.0, bool use_yaw_rate = false, float yaw_rate_cds = 0.0, bool yaw_relative = false, bool terrain_alt = false);
-    bool set_destination(const Location& dest_loc, bool use_yaw = false, float yaw_cd = 0.0, bool use_yaw_rate = false, float yaw_rate_cds = 0.0, bool yaw_relative = false);
+    virtual bool set_destination(const Location& dest_loc, bool use_yaw = false, float yaw_cd = 0.0, bool use_yaw_rate = false, float yaw_rate_cds = 0.0, bool yaw_relative = false);
     bool get_wp(Location &loc) const override;
     void set_accel(const Vector3f& acceleration, bool use_yaw = false, float yaw_cd = 0.0, bool use_yaw_rate = false, float yaw_rate_cds = 0.0, bool yaw_relative = false, bool log_request = true);
     void set_velocity(const Vector3f& velocity, bool use_yaw = false, float yaw_cd = 0.0, bool use_yaw_rate = false, float yaw_rate_cds = 0.0, bool yaw_relative = false, bool log_request = true);
@@ -970,7 +973,7 @@ public:
     bool set_attitude_target_provides_thrust() const;
     bool stabilizing_pos_xy() const;
     bool stabilizing_vel_xy() const;
-    bool use_wpnav_for_position_control() const;
+    virtual bool use_wpnav_for_position_control() const;
 
     void limit_clear();
     void limit_init_time_and_pos();
@@ -1874,3 +1877,78 @@ private:
 
 };
 #endif
+
+
+#if MODE_TETHER_LOITER_ENABLED == ENABLED
+class ModeTetherLoiter : public ModeLoiter {
+
+public:
+    using ModeLoiter::ModeLoiter;
+    Number mode_number() const override { return Number::TETHER_LOITER; }
+
+    bool init(bool ignore_checks) override;
+    void run() override;
+
+    bool is_autopilot() const override { return false; }
+
+protected:
+    const char *name()  const override { return "TETH_LOIT"; }
+    const char *name4() const override { return "TLOI"; }
+};
+#endif  // MODE_TETHER_LOITER_ENABLED
+
+
+#if MODE_TETHER_GUIDED_ENABLED == ENABLED
+class ModeTetherGuided : public ModeGuided {
+
+public:
+    using ModeGuided::ModeGuided;
+    Number mode_number() const override { return Number::TETHER_GUIDED; }
+
+    bool init(bool ignore_checks) override;
+    void run() override;
+
+    // Respects GUID_OPTIONS bit 6 (WPNavUsedForPosControl) exactly like
+    // standard Guided — set GUID_OPTIONS=64 to enable WPNav + OA/fence.
+    // When not set, uses PosVelAccel with beacon velocity feedforward.
+    // (Inherited from ModeGuided — no override needed.)
+
+    // Bring Vector3f overload into scope (otherwise the Location override hides it).
+    using ModeGuided::set_destination;
+
+    // Intercept Location-based GCS commands to capture offset and flag pending capture.
+    bool set_destination(const Location& dest_loc, bool use_yaw = false, float yaw_cd = 0.0f,
+                         bool use_yaw_rate = false, float yaw_rate_cds = 0.0f,
+                         bool yaw_relative = false) override;
+
+protected:
+    const char *name()  const override { return "TETH_GUID"; }
+    const char *name4() const override { return "TGUD"; }
+
+private:
+    // NE offset (cm, EKF-origin frame) from beacon to guided target,
+    // captured at the moment a GCS command arrives
+    Vector2f _offset_ne_cm;
+
+    // altitude of guided target (cm above EKF origin, NEU Z-up)
+    float    _target_alt_cm;
+
+    // true once an offset has been captured from a live GCS command
+    bool     _offset_valid;
+
+    // set by set_destination(Location) when a new GCS command arrives;
+    // cleared immediately after _try_capture_offset() consumes it
+    bool     _new_cmd_pending;
+
+    // NEU cm position from the most recent GCS command (set alongside flag)
+    Vector3f _pending_cmd_neu_cm;
+
+    // last NEU cm position fed to set_destination_posvel() — used to gate
+    // how often we update (avoids thrashing the pos controller)
+    Vector3f _last_update_neu_cm;
+
+    // helpers
+    void _try_capture_offset();
+    void _update_destination();
+};
+#endif  // MODE_TETHER_GUIDED_ENABLED

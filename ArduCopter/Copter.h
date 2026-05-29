@@ -215,6 +215,8 @@ public:
     friend class ModeGuided;
     friend class ModeLand;
     friend class ModeLoiter;
+    friend class ModeTetherLoiter;
+    friend class ModeTetherGuided;
     friend class ModePosHold;
     friend class ModeRTL;
     friend class ModeSmartRTL;
@@ -1015,6 +1017,12 @@ private:
 #endif
 #if MODE_TURTLE_ENABLED == ENABLED
     ModeTurtle mode_turtle;
+#endif
+#if MODE_TETHER_LOITER_ENABLED == ENABLED
+    ModeTetherLoiter mode_tether_loiter;
+#endif
+#if MODE_TETHER_GUIDED_ENABLED == ENABLED
+    ModeTetherGuided mode_tether_guided;
 #endif
 
     // mode.cpp
