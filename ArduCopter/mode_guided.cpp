@@ -6,6 +6,10 @@
  * Init and run calls for guided flight mode
  */
 
+#if MODE_TETHER_GUIDED_ENABLED == ENABLED
+static constexpr float TETHER_GUIDED_UPDATE_DIST_CM = 10.0f;
+#endif
+
 static Vector3p guided_pos_target_cm;       // position target (used by posvel controller only)
 bool guided_pos_terrain_alt;                // true if guided_pos_target_cm.z is an alt above terrain
 static Vector3f guided_vel_target_cms;      // velocity target (used by pos_vel_accel controller and vel_accel controller)
@@ -63,6 +67,41 @@ void ModeGuided::run()
 
 #if MODE_TETHER_GUIDED_ENABLED == ENABLED
     if (g2.tether.enabled()) {
+        // Detect a sysid change after at least one successful capture (active_sysid != 0).
+        // Directly compute a new offset from the aircraft's current position relative to
+        // the new beacon.  Retries every tick by leaving active_sysid at the old value
+        // until is_healthy() confirms data from the new beacon has actually arrived.
+        if (_tether.active_sysid != 0 &&
+            g2.tether.get_target_sysid() != _tether.active_sysid) {
+            _tether.offset_valid = false;
+            Location bcn_loc;
+            Vector3f bcn_neu_cm;
+            float bcn_hdg_deg;
+            if (g2.tether.is_healthy() &&
+                g2.tether.get_position(bcn_loc) &&
+                bcn_loc.get_vector_from_origin_NEU(bcn_neu_cm) &&
+                g2.tether.get_heading_deg(bcn_hdg_deg)) {
+                const Vector3f &ac = copter.inertial_nav.get_position_neu_cm();
+                const float ne_n = ac.x - bcn_neu_cm.x;
+                const float ne_e = ac.y - bcn_neu_cm.y;
+                const float h = radians(bcn_hdg_deg);
+                _tether.offset_fwd_cm   =  ne_n * cosf(h) + ne_e * sinf(h);
+                _tether.offset_right_cm = -ne_n * sinf(h) + ne_e * cosf(h);
+                _tether.target_alt_cm   = ac.z;
+                _tether.offset_valid    = true;
+                _tether.active_sysid    = g2.tether.get_target_sysid();
+                _tether.last_update_neu_cm = ac +
+                    Vector3f(TETHER_GUIDED_UPDATE_DIST_CM + 1.0f, 0.0f, 0.0f);
+                gcs().send_text(MAV_SEVERITY_INFO,
+                                "Tether: beacon sysid changed - offset reacquired "
+                                "fwd=%.1f right=%.1f m",
+                                (double)(_tether.offset_fwd_cm   * 0.01f),
+                                (double)(_tether.offset_right_cm * 0.01f));
+            }
+            // If new beacon not healthy yet, offset_valid stays false and active_sysid
+            // stays at the old value so this block retries on every subsequent tick.
+        }
+
         if (_tether.new_cmd_pending) {
             _tether.new_cmd_pending = false;
             _tether_try_capture_offset();
@@ -1285,16 +1324,16 @@ bool ModeGuided::resume()
 // -----------------------------------------------------------------------
 #if MODE_TETHER_GUIDED_ENABLED == ENABLED
 
-static constexpr float TETHER_GUIDED_UPDATE_DIST_CM = 10.0f;
-
 void ModeGuided::_tether_init()
 {
-    _tether.offset_ne_cm.zero();
+    _tether.offset_fwd_cm    = 0.0f;
+    _tether.offset_right_cm  = 0.0f;
     _tether.target_alt_cm    = 0.0f;
     _tether.offset_valid     = false;
     _tether.new_cmd_pending  = false;
     _tether.pending_cmd_neu_cm.zero();
     _tether.last_update_neu_cm.zero();
+    _tether.active_sysid     = 0;
 
     if (g2.tether.enabled()) {
         const Vector3f& cur = copter.inertial_nav.get_position_neu_cm();
@@ -1307,24 +1346,32 @@ void ModeGuided::_tether_try_capture_offset()
 {
     Location beacon_loc;
     Vector3f beacon_neu_cm;
+    float beacon_hdg_deg;
 
     if (g2.tether.is_healthy() &&
         g2.tether.get_position(beacon_loc) &&
-        beacon_loc.get_vector_from_origin_NEU(beacon_neu_cm)) {
+        beacon_loc.get_vector_from_origin_NEU(beacon_neu_cm) &&
+        g2.tether.get_heading_deg(beacon_hdg_deg)) {
 
-        _tether.offset_ne_cm.x = _tether.pending_cmd_neu_cm.x - beacon_neu_cm.x;
-        _tether.offset_ne_cm.y = _tether.pending_cmd_neu_cm.y - beacon_neu_cm.y;
-        _tether.target_alt_cm  = _tether.pending_cmd_neu_cm.z;
-        _tether.offset_valid   = true;
+        // Project NE offset into beacon track frame so the offset
+        // rotates with the beacon's direction of travel.
+        const float ne_n = _tether.pending_cmd_neu_cm.x - beacon_neu_cm.x;
+        const float ne_e = _tether.pending_cmd_neu_cm.y - beacon_neu_cm.y;
+        const float h    = radians(beacon_hdg_deg);
+        _tether.offset_fwd_cm   =  ne_n * cosf(h) + ne_e * sinf(h);
+        _tether.offset_right_cm = -ne_n * sinf(h) + ne_e * cosf(h);
+        _tether.target_alt_cm = _tether.pending_cmd_neu_cm.z;
+        _tether.offset_valid  = true;
+        _tether.active_sysid  = g2.tether.get_target_sysid();
 
         // force _tether_update_destination() to fire on this tick
         _tether.last_update_neu_cm = _tether.pending_cmd_neu_cm +
                                      Vector3f(TETHER_GUIDED_UPDATE_DIST_CM + 1.0f, 0, 0);
 
         gcs().send_text(MAV_SEVERITY_INFO,
-                        "Tether: offset captured %.1f,%.1f m",
-                        (double)(_tether.offset_ne_cm.x * 0.01f),
-                        (double)(_tether.offset_ne_cm.y * 0.01f));
+                        "Tether: offset captured fwd=%.1f right=%.1f m",
+                        (double)(_tether.offset_fwd_cm   * 0.01f),
+                        (double)(_tether.offset_right_cm * 0.01f));
     } else {
         _tether.offset_valid = false;
         gcs().send_text(MAV_SEVERITY_WARNING,
@@ -1348,9 +1395,18 @@ void ModeGuided::_tether_update_destination()
         return;
     }
 
+    // Rotate track-frame offset back to NE using current beacon heading
+    float beacon_hdg_deg;
+    if (!g2.tether.get_heading_deg(beacon_hdg_deg)) {
+        return;
+    }
+    const float h     = radians(beacon_hdg_deg);
+    const float tgt_n = _tether.offset_fwd_cm * cosf(h) - _tether.offset_right_cm * sinf(h);
+    const float tgt_e = _tether.offset_fwd_cm * sinf(h) + _tether.offset_right_cm * cosf(h);
+
     const Vector3f new_target_neu_cm(
-        beacon_neu_cm.x + _tether.offset_ne_cm.x,
-        beacon_neu_cm.y + _tether.offset_ne_cm.y,
+        beacon_neu_cm.x + tgt_n,
+        beacon_neu_cm.y + tgt_e,
         _tether.target_alt_cm);
 
     if ((new_target_neu_cm - _tether.last_update_neu_cm).length_squared() <

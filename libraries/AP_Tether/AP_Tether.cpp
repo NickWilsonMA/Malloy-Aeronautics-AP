@@ -43,15 +43,20 @@ AP_Tether::AP_Tether() :
     _last_update_ms(0),
     _target_heading_deg(0.0f),
     _have_target(false),
-    _auto_sysid(false)
+    _auto_sysid(false),
+    _last_data_sysid(0)
 {
     AP_Param::setup_object_defaults(this, var_info);
 }
 
-// is_healthy — true if enabled and beacon data arrived within timeout
+// is_healthy — true if enabled, data is from the current target sysid, and within timeout
 bool AP_Tether::is_healthy() const
 {
     if (!_enabled || !_have_target) {
+        return false;
+    }
+    // Reject stale data from a previous beacon after a sysid change
+    if (_last_data_sysid != (uint8_t)_target_sysid) {
         return false;
     }
     return (AP_HAL::millis() - _last_update_ms) < (uint32_t)_stale_ms;
@@ -119,6 +124,7 @@ void AP_Tether::handle_msg(const mavlink_message_t &msg)
     // store heading: hdg in cdeg (0=north, 36000=north)
     _target_heading_deg = pkt.hdg * 0.01f;
 
+    _last_data_sysid = incoming_sysid;
     _have_target = true;
     _last_update_ms = AP_HAL::millis();
 }

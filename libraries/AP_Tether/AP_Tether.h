@@ -66,4 +66,5 @@ private:
     float    _target_heading_deg;
     bool     _have_target;
     bool     _auto_sysid;               // true when sysid was auto-latched
+    uint8_t  _last_data_sysid;          // sysid of the beacon whose data we currently hold
 };

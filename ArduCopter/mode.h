@@ -1065,12 +1065,14 @@ private:
     // Tether overlay state — active when TETH_ENABLE=1 and beacon is healthy.
     // Guided commands are interpreted as offsets relative to the beacon.
     struct {
-        Vector2f offset_ne_cm;        // NE offset (cm) from beacon to commanded target
+        float    offset_fwd_cm;       // offset along beacon track heading (cm)
+        float    offset_right_cm;     // offset right of beacon track heading (cm)
         float    target_alt_cm;       // altitude of commanded target (cm above EKF origin)
         bool     offset_valid;        // true once an offset has been captured
         bool     new_cmd_pending;     // set when a new Location-based GCS command arrives
         Vector3f pending_cmd_neu_cm;  // NEU cm position from the most recent GCS command
         Vector3f last_update_neu_cm;  // last NEU cm position sent to posvelaccel controller
+        uint8_t  active_sysid;        // sysid of beacon used when offset was last captured
     } _tether;
 
     void _tether_init();
@@ -1185,6 +1187,16 @@ private:
 #if PRECISION_LANDING == ENABLED
     bool _precision_loiter_enabled;
     bool _precision_loiter_active; // true if user has switched on prec loiter
+#endif
+
+#if MODE_TETHER_LOITER_ENABLED == ENABLED
+    struct {
+        float   offset_fwd_cm;       // offset along beacon track heading (cm) — beacon frame
+        float   offset_right_cm;     // offset right of beacon track heading (cm) — beacon frame
+        float   heading_offset_deg;  // aircraft heading minus beacon track heading at last yaw input
+        bool    offset_valid;
+        uint8_t active_sysid;        // sysid of beacon when offset was captured
+    } _tether;
 #endif
 
 };
