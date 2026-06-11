@@ -156,6 +156,10 @@ void ModeAuto::run()
     case SubMode::NAV_ATTITUDE_TIME:
         nav_attitude_time_run();
         break;
+
+    case SubMode::TETHER_WP:
+        nav_tether_wp_run();
+        break;
     }
 
     // only pretend to be in auto RTL so long as mission still thinks its in a landing sequence or the mission has completed
@@ -655,6 +659,10 @@ bool ModeAuto::start_command(const AP_Mission::Mission_Command& cmd)
         do_nav_attitude_time(cmd);
         break;
 
+    case MAV_CMD_USER_1:                // tether beacon-relative waypoint
+        do_nav_tether_wp(cmd);
+        break;
+
     //
     // conditional commands
     //
@@ -894,6 +902,10 @@ bool ModeAuto::verify_command(const AP_Mission::Mission_Command& cmd)
 
     case MAV_CMD_NAV_ATTITUDE_TIME:
         cmd_complete = verify_nav_attitude_time(cmd);
+        break;
+
+    case MAV_CMD_USER_1:                // tether beacon-relative waypoint
+        cmd_complete = verify_nav_tether_wp();
         break;
 
     ///
@@ -2241,6 +2253,385 @@ bool ModeAuto::resume()
 
     wp_nav->set_resume();
     return true;
+}
+
+// -----------------------------------------------------------------------
+// Tether beacon-relative waypoint (MAV_CMD_USER_1)
+//
+// Command encoding (MISSION_ITEM_INT):
+//   param1 (→ cmd.p1)              : beacon sysid (1–255)
+//   x      (→ content.location.lat): forward offset, cm  (along beacon heading)
+//   y      (→ content.location.lng): right offset,   cm
+//   z      (→ content.location.alt): altitude,        cm (above home, relative_alt=1)
+//
+// TETH_ENABLE must be 1.  If the beacon is lost for more than
+// TETHER_WP_LOST_TIMEOUT_MS the vehicle triggers RTL.
+// -----------------------------------------------------------------------
+
+void ModeAuto::do_nav_tether_wp(const AP_Mission::Mission_Command& cmd)
+{
+    if (!g2.tether.enabled()) {
+        gcs().send_text(MAV_SEVERITY_WARNING, "TetherWP: TETH_ENABLE not set, holding until enabled");
+    }
+
+    _tether_wp.sysid            = (uint8_t)cmd.p1;
+    _tether_wp.offset_valid     = false;
+    _tether_wp.beacon_lost_ms   = 0;
+    _tether_wp.dwell_start_ms   = 0;
+    _tether_wp.last_target_neu_cm.zero();
+    _tether_wp.in_position           = false;
+    _tether_wp.dr_target_neu_cm.zero();
+    _tether_wp.last_run_ms           = 0;
+
+    // unpack offsets from content (same encoding as AP_Mission storage)
+    // offsets stored as dm (int16_t) to fit the 10-byte content limit
+    struct PACKED TetherWP { int16_t fwd_dm; int16_t right_dm; int16_t alt_dm; int16_t hold_sec; };
+    TetherWP tw;
+    memcpy(&tw, &cmd.content, sizeof(tw));
+    _tether_wp.offset_fwd_cm   = tw.fwd_dm   * 10.0f;  // dm -> cm
+    _tether_wp.offset_right_cm = tw.right_dm * 10.0f;  // dm -> cm
+    _tether_wp.hold_sec        = tw.hold_sec;
+
+    // convert altitude (decimetres above home) to cm above EKF origin.
+    // If alt is zero (not set in mission), hold the current flight altitude.
+    if (tw.alt_dm == 0) {
+        _tether_wp.target_alt_cm = inertial_nav.get_position_z_up_cm();
+    } else {
+        Location alt_loc = copter.ahrs.get_home();
+        const int32_t alt_cm = tw.alt_dm * 10;
+        alt_loc.set_alt_cm(alt_cm, Location::AltFrame::ABOVE_HOME);
+        int32_t alt_origin_cm;
+        if (alt_loc.get_alt_cm(Location::AltFrame::ABOVE_ORIGIN, alt_origin_cm)) {
+            _tether_wp.target_alt_cm = (float)alt_origin_cm;
+        } else {
+            _tether_wp.target_alt_cm = (float)alt_cm;
+        }
+    }
+
+    // Speed/accel limits apply on every entry.
+    pos_control->set_max_speed_accel_xy(wp_nav->get_default_speed_xy(), wp_nav->get_wp_acceleration());
+    pos_control->set_correction_speed_accel_xy(wp_nav->get_default_speed_xy(), wp_nav->get_wp_acceleration());
+    pos_control->set_max_speed_accel_z(wp_nav->get_default_speed_down(), wp_nav->get_default_speed_up(), wp_nav->get_accel_z());
+    pos_control->set_correction_speed_accel_z(wp_nav->get_default_speed_down(), wp_nav->get_default_speed_up(), wp_nav->get_accel_z());
+
+    // Only hard-reset the position controller when first entering TETHER_WP.
+    // On WP-to-WP transitions we stay in the same submode, so skip the init to
+    // preserve the current velocity and avoid a momentary stop.
+    if (_mode != SubMode::TETHER_WP) {
+        pos_control->init_z_controller();
+        pos_control->init_xy_controller();
+        // Face direction of travel — same as TetherGuided.
+        auto_yaw.set_mode(AUTO_YAW_LOOK_AHEAD);
+    }
+
+    set_submode(SubMode::TETHER_WP);
+
+    gcs().send_text(MAV_SEVERITY_INFO,
+                    "TetherWP: sysid=%u fwd=%.1fm right=%.1fm alt=%.1fm hold=%ds",
+                    (unsigned)_tether_wp.sysid,
+                    (double)(_tether_wp.offset_fwd_cm   * 0.01f),
+                    (double)(_tether_wp.offset_right_cm * 0.01f),
+                    (double)(_tether_wp.target_alt_cm   * 0.01f),
+                    (int)_tether_wp.hold_sec);
+}
+
+void ModeAuto::nav_tether_wp_run()
+{
+    if (is_disarmed_or_landed()) {
+        make_safe_ground_handling();
+        return;
+    }
+    motors->set_desired_spool_state(AP_Motors::DesiredSpoolState::THROTTLE_UNLIMITED);
+
+    // Periodic diagnostic — fires every 5 s so the GCS can show what gate we're stuck in.
+    {
+        static uint32_t _diag_ms;
+        const uint32_t _now = AP_HAL::millis();
+        if (_now - _diag_ms > 5000) {
+            _diag_ms = _now;
+            const bool en      = g2.tether.enabled();
+            const bool healthy = g2.tether.is_healthy(_tether_wp.sysid);
+            const Vector3f &ac = copter.inertial_nav.get_position_neu_cm();
+            gcs().send_text(MAV_SEVERITY_INFO,
+                            "TetherWP diag: en=%d bcn_ok=%d sysid=%u "
+                            "fwd=%.1fm right=%.1fm ac=(%.0f,%.0f,%.0f)cm",
+                            (int)en, (int)healthy,
+                            (unsigned)_tether_wp.sysid,
+                            (double)(_tether_wp.offset_fwd_cm   * 0.01f),
+                            (double)(_tether_wp.offset_right_cm * 0.01f),
+                            (double)ac.x, (double)ac.y, (double)ac.z);
+        }
+    }
+
+    // --- tether enable gate — hold position until TETH_ENABLE becomes 1 ---
+    if (!g2.tether.enabled()) {
+        if (_tether_wp.offset_valid) {
+            Vector2p pos_xy = _tether_wp.last_target_neu_cm.xy().topostype();
+            Vector2f zero2;
+            pos_control->input_pos_vel_accel_xy(pos_xy, zero2, zero2, false);
+            float pz    = _tether_wp.last_target_neu_cm.z;
+            float vel_z = 0.0f;
+            float acc_z = 0.0f;
+            pos_control->input_pos_vel_accel_z(pz, vel_z, acc_z, false);
+            _tether_wp.last_target_neu_cm.z = pz;
+        }
+        pos_control->update_xy_controller();
+        pos_control->update_z_controller();
+        attitude_control->input_thrust_vector_rate_heading(pos_control->get_thrust_vector(), 0.0f);
+        return;
+    }
+
+    const uint32_t now = AP_HAL::millis();
+
+    // --- beacon health gate ---
+    if (!g2.tether.is_healthy(_tether_wp.sysid)) {
+        if (_tether_wp.beacon_lost_ms == 0) {
+            _tether_wp.beacon_lost_ms = now;
+            gcs().send_text(MAV_SEVERITY_WARNING,
+                            "TetherWP: beacon sysid=%u lost, holding position",
+                            (unsigned)_tether_wp.sysid);
+        } else if (now - _tether_wp.beacon_lost_ms > TETHER_WP_LOST_TIMEOUT_MS) {
+            switch (g2.tether.get_fs_action()) {
+            case AP_Tether::FSAction::HOLD:
+                break;  // hold indefinitely, no mode change
+            case AP_Tether::FSAction::LAND:
+                gcs().send_text(MAV_SEVERITY_CRITICAL, "TetherWP: beacon timeout, Landing");
+                copter.set_mode(Mode::Number::LAND, ModeReason::FAILSAFE);
+                return;
+            case AP_Tether::FSAction::RTL:
+            default:
+                gcs().send_text(MAV_SEVERITY_CRITICAL, "TetherWP: beacon timeout, RTL");
+                copter.set_mode(Mode::Number::RTL, ModeReason::FAILSAFE);
+                return;
+            }
+        }
+        // hold last position — feed zero velocity to keep pos_control stable
+        if (_tether_wp.offset_valid) {
+            Vector2p pos_xy = _tether_wp.last_target_neu_cm.xy().topostype();
+            Vector2f zero2;
+            pos_control->input_pos_vel_accel_xy(pos_xy, zero2, zero2, false);
+            float pz    = _tether_wp.last_target_neu_cm.z;
+            float vel_z = 0.0f;
+            float acc_z = 0.0f;
+            pos_control->input_pos_vel_accel_z(pz, vel_z, acc_z, false);
+            _tether_wp.last_target_neu_cm.z = pz;
+        }
+        pos_control->update_xy_controller();
+        pos_control->update_z_controller();
+        attitude_control->input_thrust_vector_rate_heading(pos_control->get_thrust_vector(), 0.0f);
+        return;
+    }
+
+    // beacon healthy — reset lost timer
+    _tether_wp.beacon_lost_ms = 0;
+
+    // --- compute world-frame target ---
+    Location beacon_loc;
+    Vector3f beacon_neu_cm;
+    float    beacon_hdg_deg;
+    Vector3f beacon_vel_ned;
+
+    if (!g2.tether.get_position(_tether_wp.sysid, beacon_loc) ||
+        !beacon_loc.get_vector_from_origin_NEU(beacon_neu_cm) ||
+        !g2.tether.get_heading_deg(_tether_wp.sysid, beacon_hdg_deg)) {
+        // data unavailable this tick — run controllers with stale target
+        if (_tether_wp.offset_valid) {
+            Vector2p pos_xy = _tether_wp.last_target_neu_cm.xy().topostype();
+            Vector2f zero2;
+            pos_control->input_pos_vel_accel_xy(pos_xy, zero2, zero2, false);
+            float pz = _tether_wp.last_target_neu_cm.z, vel_z = 0.0f, acc_z = 0.0f;
+            pos_control->input_pos_vel_accel_z(pz, vel_z, acc_z, false);
+        }
+        pos_control->update_xy_controller();
+        pos_control->update_z_controller();
+        attitude_control->input_thrust_vector_rate_heading(pos_control->get_thrust_vector(), 0.0f);
+        return;
+    }
+
+    const float h     = radians(beacon_hdg_deg);
+    const float cos_h = cosf(h), sin_h = sinf(h);
+    const float tgt_n = _tether_wp.offset_fwd_cm * cos_h - _tether_wp.offset_right_cm * sin_h;
+    const float tgt_e = _tether_wp.offset_fwd_cm * sin_h + _tether_wp.offset_right_cm * cos_h;
+
+    const Vector3f new_target_neu_cm(
+        beacon_neu_cm.x + tgt_n,
+        beacon_neu_cm.y + tgt_e,
+        _tether_wp.target_alt_cm);
+
+    g2.tether.get_velocity_ned(_tether_wp.sysid, beacon_vel_ned);
+    const float vel_N_cms = beacon_vel_ned.x * 100.0f;
+    const float vel_E_cms = beacon_vel_ned.y * 100.0f;
+
+    // --- dt for dead-reckoning (capped to prevent large jumps after early-return ticks) ---
+    const float dt = (_tether_wp.last_run_ms > 0)
+                     ? MIN((now - _tether_wp.last_run_ms) * 0.001f, 0.2f)
+                     : 0.0f;
+    _tether_wp.last_run_ms = now;
+
+    // Velocity comes directly from GLOBAL_POSITION_INT vx/vy — the beacon is
+    // responsible for sending accurate velocity in that message.
+    // fwd_unit = (cos_h, sin_h) in NE; right_unit = (-sin_h, cos_h) in NE.
+    const Vector2f track_vel_cms(vel_N_cms, vel_E_cms);
+    const float v_along_cms = vel_N_cms * cos_h + vel_E_cms * sin_h;
+    const Vector2f vel_along_ne(v_along_cms * cos_h, v_along_cms * sin_h);
+
+    // --- Proximity gate: enter velocity-tracking mode once settled within acceptance radius ---
+    const float accept_cm  = g2.tether.get_wp_radius_cm();
+    const Vector3f &ac_pos = inertial_nav.get_position_neu_cm();
+    const float horiz_err_cm = (new_target_neu_cm.xy() - ac_pos.xy()).length();
+
+    if (!_tether_wp.in_position) {
+        if (horiz_err_cm < accept_cm) {
+            _tether_wp.in_position      = true;
+            _tether_wp.dr_target_neu_cm = new_target_neu_cm;
+        }
+    } else {
+        // Exit based on error to dr_target (not new_target) so beacon position snaps
+        // don't evict us from velocity-tracking mode on every low-rate GPS update.
+        const float dr_err_cm = (_tether_wp.dr_target_neu_cm.xy() - ac_pos.xy()).length();
+        if (dr_err_cm > accept_cm * 3.0f) {
+            _tether_wp.in_position = false;
+        }
+    }
+
+    // --- Select position target and velocity feedforward ---
+    Vector3f target_neu_cm;
+    Vector2f vel_ff;
+
+    if (_tether_wp.in_position) {
+        // Dead-reckon the target using the track velocity so it advances smoothly
+        // between low-rate beacon position updates.
+        _tether_wp.dr_target_neu_cm.x += track_vel_cms.x * dt;
+        _tether_wp.dr_target_neu_cm.y += track_vel_cms.y * dt;
+
+        // Soft cross-track correction: nudge dr_target laterally toward new_target
+        // to follow beacon turns without reintroducing position-snap jerk.
+        // Along-track position jumps are intentionally ignored — dead-reckoning handles
+        // longitudinal advance and the velocity feedforward prevents lag.
+        const Vector2f err_ne = new_target_neu_cm.xy() - _tether_wp.dr_target_neu_cm.xy();
+        const float err_cross = -err_ne.x * sin_h + err_ne.y * cos_h;
+        const float corr = constrain_float(err_cross, -50.0f * dt, 50.0f * dt);  // max 0.5 m/s
+        _tether_wp.dr_target_neu_cm.x += -corr * sin_h;
+        _tether_wp.dr_target_neu_cm.y +=  corr * cos_h;
+
+        target_neu_cm = _tether_wp.dr_target_neu_cm;
+        // Along-track velocity as feedforward so the position controller always
+        // commands forward motion at beacon pace; cross-track is handled by the
+        // gentle position correction above.
+        vel_ff = vel_along_ne;
+    } else {
+        // Not yet in position: chase the absolute target with full velocity feedforward.
+        target_neu_cm               = new_target_neu_cm;
+        vel_ff                      = track_vel_cms;
+        _tether_wp.dr_target_neu_cm = new_target_neu_cm;
+    }
+
+    Vector2p pos_xy = target_neu_cm.xy().topostype();
+    Vector2f zero2;
+    pos_control->input_pos_vel_accel_xy(pos_xy, vel_ff, zero2, false);
+
+    float pz    = target_neu_cm.z;
+    float vel_z = 0.0f;
+    float acc_z = 0.0f;
+    pos_control->input_pos_vel_accel_z(pz, vel_z, acc_z, false);
+
+    _tether_wp.last_target_neu_cm = target_neu_cm;
+    _tether_wp.offset_valid       = true;
+
+    pos_control->update_xy_controller();
+    pos_control->update_z_controller();
+
+    // Yaw: pilot stick overrides first; then TETH_OPTIONS bit 0 selects between
+    // beacon track heading (fixed) or velocity look-ahead (default).
+    float target_yaw_rate = 0.0f;
+    if (!copter.failsafe.radio && use_pilot_yaw()) {
+        target_yaw_rate = get_pilot_desired_yaw_rate(channel_yaw->norm_input_dz());
+    }
+    if (!is_zero(target_yaw_rate)) {
+        auto_yaw.set_mode(AUTO_YAW_HOLD);
+        attitude_control->input_thrust_vector_rate_heading(pos_control->get_thrust_vector(), target_yaw_rate);
+    } else if (g2.tether.option_is_set(AP_Tether::OPTION_BEACON_HEADING)) {
+        auto_yaw.set_fixed_yaw(beacon_hdg_deg, 0.0f, 0, false);
+        attitude_control->input_thrust_vector_heading(pos_control->get_thrust_vector(), auto_yaw.yaw(), auto_yaw.rate_cds());
+    } else {
+        auto_yaw.set_mode(AUTO_YAW_LOOK_AHEAD);
+        attitude_control->input_thrust_vector_heading(pos_control->get_thrust_vector(), auto_yaw.yaw(), auto_yaw.rate_cds());
+    }
+}
+
+bool ModeAuto::verify_nav_tether_wp()
+{
+    if (!g2.tether.enabled())        return false;
+    if (!_tether_wp.offset_valid)    return false;
+    if (!g2.tether.is_healthy(_tether_wp.sysid)) return false;
+
+    Location beacon_loc;
+    Vector3f beacon_neu_cm;
+    float    beacon_hdg_deg;
+    if (!g2.tether.get_position(_tether_wp.sysid, beacon_loc) ||
+        !beacon_loc.get_vector_from_origin_NEU(beacon_neu_cm) ||
+        !g2.tether.get_heading_deg(_tether_wp.sysid, beacon_hdg_deg)) {
+        return false;
+    }
+
+    const Vector3f &ac_neu = copter.inertial_nav.get_position_neu_cm();
+    const float ne_n = ac_neu.x - beacon_neu_cm.x;
+    const float ne_e = ac_neu.y - beacon_neu_cm.y;
+    const float h    = radians(beacon_hdg_deg);
+    const float ac_fwd   =  ne_n * cosf(h) + ne_e * sinf(h);
+    const float ac_right = -ne_n * sinf(h) + ne_e * cosf(h);
+
+    const float horiz_err_cm = norm(ac_fwd  - _tether_wp.offset_fwd_cm,
+                                    ac_right - _tether_wp.offset_right_cm);
+
+    // Use the proximity gate set by nav_tether_wp_run() (which has hysteresis) as
+    // the source of truth so the dwell timer doesn't reset on every beacon position snap.
+    const bool in_pos = _tether_wp.in_position;
+
+    const uint32_t now_ms = AP_HAL::millis();
+
+    if (in_pos) {
+        if (_tether_wp.dwell_start_ms == 0) {
+            _tether_wp.dwell_start_ms = now_ms;
+            gcs().send_text(MAV_SEVERITY_INFO, "TetherWP: in position h=%.1fm",
+                            (double)(horiz_err_cm * 0.01f));
+        }
+    } else {
+        _tether_wp.dwell_start_ms = 0;
+    }
+
+    // Periodic status (every 2 s)
+    static uint32_t _last_log_ms;
+    if (now_ms - _last_log_ms > 2000) {
+        _last_log_ms = now_ms;
+        if (_tether_wp.hold_sec == 0) {
+            gcs().send_text(in_pos ? MAV_SEVERITY_INFO : MAV_SEVERITY_WARNING,
+                            "TetherWP%s h=%.1fm — advance via GCS",
+                            in_pos ? " IN POS:" : ":",
+                            (double)(horiz_err_cm * 0.01f));
+        } else {
+            const uint32_t elapsed_ms  = _tether_wp.dwell_start_ms
+                                         ? (now_ms - _tether_wp.dwell_start_ms) : 0;
+            const float    remaining_s = MAX(0.0f,
+                                             (float)_tether_wp.hold_sec - elapsed_ms * 0.001f);
+            gcs().send_text(in_pos ? MAV_SEVERITY_INFO : MAV_SEVERITY_WARNING,
+                            "TetherWP%s h=%.1fm hold=%.0fs",
+                            in_pos ? " IN POS:" : ":",
+                            (double)(horiz_err_cm * 0.01f),
+                            (double)remaining_s);
+        }
+    }
+
+    if (_tether_wp.hold_sec == 0) {
+        return false;
+    }
+
+    if (_tether_wp.dwell_start_ms != 0 &&
+        (now_ms - _tether_wp.dwell_start_ms) >= (uint32_t)_tether_wp.hold_sec * 1000UL) {
+        gcs().send_mission_item_reached_message(mission.get_current_nav_index());
+        return true;
+    }
+    return false;
 }
 
 #endif

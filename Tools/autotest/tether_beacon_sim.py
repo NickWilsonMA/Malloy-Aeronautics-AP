@@ -1,16 +1,14 @@
 #!/usr/bin/env python3
 """
-Tether beacon simulator — two simultaneous beacons.
+Tether beacon simulator — two simultaneous beacons, NMEA only.
 
-Beacon 1 (default: MAVLink sysid=2, port 14551, NMEA port 3000):
+Beacon 1 (default: NMEA port 3000):
   250 m radius, clockwise at 3 m/s.
 
-Beacon 2 (default: MAVLink sysid=3, port 14552, NMEA port 3001):
+Beacon 2 (default: NMEA port 3001):
   300 m radius, anti-clockwise at 3 m/s.
 
-Each beacon sends:
-  - GLOBAL_POSITION_INT (MAVLink) so AP_Tether can track it.
-  - NMEA GGA + RMC + ZDA over UDP so QGC shows it on the map.
+Each beacon sends NMEA GGA + RMC + ZDA over UDP so QGC shows it on the map.
 
 QGC setup:
   Settings → General → NMEA GPS Device → UDP Port <nmea-port1 or nmea-port2>
@@ -24,14 +22,7 @@ Usage:
 import argparse
 import math
 import socket
-import sys
 import time
-
-try:
-    from pymavlink import mavutil
-except ImportError:
-    print("ERROR: pymavlink not installed.  Run:  pip install pymavlink")
-    sys.exit(1)
 
 # ---------------------------------------------------------------------------
 DEFAULT_LAT =  51.4962507
@@ -43,25 +34,12 @@ EARTH       =  6378137.0   # WGS-84 equatorial radius, m
 
 def parse_args():
     p = argparse.ArgumentParser(
-        description="Tether beacon simulator — two MAVLink beacons + two NMEA streams")
+        description="Tether beacon simulator — two NMEA streams")
 
-    # Beacon 1
-    p.add_argument("--port",       type=int, default=14551,
-                   help="Beacon 1 MAVLink UDP port (default: 14551)")
-    p.add_argument("--sysid",      type=int, default=2,
-                   help="Beacon 1 MAVLink sysid (default: 2)")
     p.add_argument("--nmea-port",  type=int, default=3000,
                    help="Beacon 1 NMEA UDP port (default: 3000)")
-
-    # Beacon 2
-    p.add_argument("--port2",      type=int, default=14551,
-                   help="Beacon 2 MAVLink UDP port (default: 14551)")
-    p.add_argument("--sysid2",     type=int, default=3,
-                   help="Beacon 2 MAVLink sysid (default: 3)")
     p.add_argument("--nmea-port2", type=int, default=3001,
                    help="Beacon 2 NMEA UDP port (default: 3001)")
-
-    # Shared
     p.add_argument("--nmea-host",  default="127.0.0.1",
                    help="NMEA UDP destination host (default: 127.0.0.1)")
     p.add_argument("--lat",  type=float, default=DEFAULT_LAT)
@@ -136,17 +114,6 @@ def send_nmea(sock, dest, lat, lon, alt, speed_ms, heading):
 
 # ---------------------------------------------------------------------------
 
-def connect_beacon(port, sysid, label):
-    print(f"  [{label}] Connecting to udpin:0.0.0.0:{port} (sysid={sysid}) ...", end="", flush=True)
-    mav = mavutil.mavlink_connection(
-        f"udpin:0.0.0.0:{port}",
-        source_system=sysid,
-        source_component=mavutil.mavlink.MAV_COMP_ID_AUTOPILOT1)
-    mav.wait_heartbeat(timeout=30)
-    print(f" OK (target sysid={mav.target_system})")
-    return mav
-
-
 def beacon_position(center_lat, center_lon, cos_lat, radius, omega, t, clockwise):
     """Return (lat, lon, vN, vE, heading) for a circular orbit."""
     theta = omega * t
@@ -164,13 +131,10 @@ def beacon_position(center_lat, center_lon, cos_lat, radius, omega, t, clockwise
 
 
 def run(args):
-    print("Tether beacon simulator — dual beacon mode")
+    print("Tether beacon simulator — NMEA only")
     print()
 
-    mav1 = connect_beacon(args.port,  args.sysid,  "Beacon 1")
-    mav2 = connect_beacon(args.port2, args.sysid2, "Beacon 2")
-
-    nmea_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    nmea_sock  = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     nmea_dest1 = (args.nmea_host, args.nmea_port)
     nmea_dest2 = (args.nmea_host, args.nmea_port2)
 
@@ -189,50 +153,26 @@ def run(args):
     dt = 1.0 / args.rate
     t  = 0.0
 
-    print()
-    print(f"  Centre     : ({center_lat:.7f}, {center_lon:.7f})  alt={args.alt:.1f} m MSL")
-    print(f"  Beacon 1   : r={radius1:.0f} m  CW   period={period1:.0f} s  "
-          f"MAVLink port={args.port} sysid={args.sysid}  NMEA port={args.nmea_port}")
-    print(f"  Beacon 2   : r={radius2:.0f} m  CCW  period={period2:.0f} s  "
-          f"MAVLink port={args.port2} sysid={args.sysid2}  NMEA port={args.nmea_port2}")
-    print(f"  NMEA host  : {args.nmea_host}")
-    print(f"  Rate       : {args.rate:.1f} Hz")
+    print(f"  Centre   : ({center_lat:.7f}, {center_lon:.7f})  alt={args.alt:.1f} m MSL")
+    print(f"  Beacon 1 : r={radius1:.0f} m  CW   period={period1:.0f} s  NMEA → {args.nmea_host}:{args.nmea_port}")
+    print(f"  Beacon 2 : r={radius2:.0f} m  CCW  period={period2:.0f} s  NMEA → {args.nmea_host}:{args.nmea_port2}")
+    print(f"  Rate     : {args.rate:.1f} Hz")
     print("Press Ctrl-C to stop\n")
 
     try:
         while True:
-            tboot_ms = int(t * 1000) & 0xFFFFFFFF
-
-            # --- Beacon 1: 250 m clockwise ---
             lat1, lon1, vN1, vE1, hdg1 = beacon_position(
                 center_lat, center_lon, cos_lat, radius1, omega1, t, clockwise=True)
-
-            mav1.mav.global_position_int_send(
-                tboot_ms,
-                int(lat1 * 1e7), int(lon1 * 1e7),
-                int(args.alt * 1000), int(args.alt * 1000),
-                int(vN1 * 100), int(vE1 * 100), 0,
-                int(hdg1 * 100))
-
             send_nmea(nmea_sock, nmea_dest1, lat1, lon1, args.alt, SPEED_MS, hdg1)
 
-            # --- Beacon 2: 300 m anti-clockwise ---
             lat2, lon2, vN2, vE2, hdg2 = beacon_position(
                 center_lat, center_lon, cos_lat, radius2, omega2, t, clockwise=False)
-
-            mav2.mav.global_position_int_send(
-                tboot_ms,
-                int(lat2 * 1e7), int(lon2 * 1e7),
-                int(args.alt * 1000), int(args.alt * 1000),
-                int(vN2 * 100), int(vE2 * 100), 0,
-                int(hdg2 * 100))
-
             send_nmea(nmea_sock, nmea_dest2, lat2, lon2, args.alt, SPEED_MS, hdg2)
 
             ts = time.strftime("%H:%M:%S")
             print(f"\r  [{ts}]  "
-                  f"B1 ({lat1:.6f},{lon1:.6f})  "
-                  f"B2 ({lat2:.6f},{lon2:.6f})",
+                  f"B1 ({lat1:.6f},{lon1:.6f}) hdg={hdg1:.1f}°  "
+                  f"B2 ({lat2:.6f},{lon2:.6f}) hdg={hdg2:.1f}°",
                   end="", flush=True)
 
             t += dt

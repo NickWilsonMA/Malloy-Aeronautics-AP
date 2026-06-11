@@ -36,6 +36,28 @@ const AP_Param::GroupInfo AP_Tether::var_info[] = {
     // @User: Standard
     AP_GROUPINFO("BCN_TIMEOUT", 3, AP_Tether, _stale_ms, AP_TETHER_STALE_MS_DEFAULT),
 
+    // @Param: WPNAV_RADIUS
+    // @DisplayName: Tether waypoint acceptance radius
+    // @Description: Horizontal radius in metres within which the aircraft must be (relative to the beacon-frame target offset) before the dwell timer starts. Increase if the aircraft cannot converge on large offsets.
+    // @Range: 1 50
+    // @Units: m
+    // @User: Standard
+    AP_GROUPINFO("WP_RADIUS", 4, AP_Tether, _wp_radius, 5.0f),
+
+    // @Param: FS_OPTIONS
+    // @DisplayName: Tether beacon failsafe action
+    // @Description: Action taken when the beacon has been lost for longer than BCN_TIMEOUT. 0=Hold position indefinitely, 1=RTL, 2=Land.
+    // @Values: 0:Hold,1:RTL,2:Land
+    // @User: Standard
+    AP_GROUPINFO("FS_OPTIONS", 5, AP_Tether, _fs_action, 1),
+
+    // @Param: OPTIONS
+    // @DisplayName: Tether options bitmask
+    // @Description: Bitmask of tether behaviour options. Bit0: fix aircraft yaw to the beacon track heading (applies to AUTO tether waypoints only, not Loiter).
+    // @Bitmask: 0:BeaconHeading
+    // @User: Standard
+    AP_GROUPINFO("OPTIONS", 6, AP_Tether, _options, 0),
+
     AP_GROUPEND
 };
 
@@ -47,6 +69,7 @@ AP_Tether::AP_Tether() :
     _last_data_sysid(0)
 {
     AP_Param::setup_object_defaults(this, var_info);
+    memset(_beacon_cache, 0, sizeof(_beacon_cache));
 }
 
 // is_healthy — true if enabled, data is from the current target sysid, and within timeout
@@ -93,38 +116,105 @@ void AP_Tether::handle_msg(const mavlink_message_t &msg)
 
     const uint8_t incoming_sysid = msg.sysid;
 
+    // decode packet
+    mavlink_global_position_int_t pkt;
+    mavlink_msg_global_position_int_decode(&msg, &pkt);
+
+    const Location  loc(pkt.lat, pkt.lon, pkt.alt / 10, Location::AltFrame::ABSOLUTE);
+    const Vector3f  vel(pkt.vx * 0.01f, pkt.vy * 0.01f, pkt.vz * 0.01f);
+    const float     hdg = pkt.hdg * 0.01f;
+    const uint32_t  now = AP_HAL::millis();
+
+    // update per-sysid cache for every beacon regardless of target_sysid
+    bool cached = false;
+    for (uint8_t i = 0; i < BEACON_CACHE_MAX; i++) {
+        if (_beacon_cache[i].valid && _beacon_cache[i].sysid == incoming_sysid) {
+            _beacon_cache[i].location       = loc;
+            _beacon_cache[i].velocity_ned   = vel;
+            _beacon_cache[i].heading_deg    = hdg;
+            _beacon_cache[i].last_update_ms = now;
+            cached = true;
+            break;
+        }
+    }
+    if (!cached) {
+        // find an empty slot
+        for (uint8_t i = 0; i < BEACON_CACHE_MAX; i++) {
+            if (!_beacon_cache[i].valid) {
+                _beacon_cache[i].sysid          = incoming_sysid;
+                _beacon_cache[i].location       = loc;
+                _beacon_cache[i].velocity_ned   = vel;
+                _beacon_cache[i].heading_deg    = hdg;
+                _beacon_cache[i].last_update_ms = now;
+                _beacon_cache[i].valid          = true;
+                break;
+            }
+        }
+        // if all slots full, oldest slot is silently dropped (cache is a best-effort store)
+    }
+
+    // update single-target tracking state for existing guided/loiter modes
     if ((uint8_t)_target_sysid == 0) {
         // auto-latch mode: accept the first sysid we see
         if (!_auto_sysid) {
             _target_sysid.set(incoming_sysid);
             _auto_sysid = true;
         } else if (incoming_sysid != (uint8_t)_target_sysid) {
-            return;  // already latched to a different sysid
+            return;
         }
     } else {
-        // fixed sysid mode
         if (incoming_sysid != (uint8_t)_target_sysid) {
             return;
         }
     }
 
-    // decode packet
-    mavlink_global_position_int_t pkt;
-    mavlink_msg_global_position_int_decode(&msg, &pkt);
+    _target_location     = loc;
+    _target_velocity_ned = vel;
+    _target_heading_deg  = hdg;
+    _last_data_sysid     = incoming_sysid;
+    _have_target         = true;
+    _last_update_ms      = now;
+}
 
-    // store position
-    // pkt.lat/lon in degE7, pkt.alt in mm MSL → Location wants cm for alt
-    _target_location = Location(pkt.lat, pkt.lon, pkt.alt / 10, Location::AltFrame::ABSOLUTE);
+// --- per-sysid query API ---
 
-    // store velocity: GLOBAL_POSITION_INT vx/vy/vz are cm/s in NED frame
-    _target_velocity_ned.x = pkt.vx * 0.01f;   // north, m/s
-    _target_velocity_ned.y = pkt.vy * 0.01f;   // east,  m/s
-    _target_velocity_ned.z = pkt.vz * 0.01f;   // down,  m/s
+const AP_Tether::BeaconData* AP_Tether::_find_beacon(uint8_t sysid) const
+{
+    for (uint8_t i = 0; i < BEACON_CACHE_MAX; i++) {
+        if (_beacon_cache[i].valid && _beacon_cache[i].sysid == sysid) {
+            return &_beacon_cache[i];
+        }
+    }
+    return nullptr;
+}
 
-    // store heading: hdg in cdeg (0=north, 36000=north)
-    _target_heading_deg = pkt.hdg * 0.01f;
+bool AP_Tether::is_healthy(uint8_t sysid) const
+{
+    if (!_enabled) return false;
+    const BeaconData* b = _find_beacon(sysid);
+    return b && (AP_HAL::millis() - b->last_update_ms) < (uint32_t)_stale_ms;
+}
 
-    _last_data_sysid = incoming_sysid;
-    _have_target = true;
-    _last_update_ms = AP_HAL::millis();
+bool AP_Tether::get_position(uint8_t sysid, Location &loc) const
+{
+    const BeaconData* b = _find_beacon(sysid);
+    if (!b || !is_healthy(sysid)) return false;
+    loc = b->location;
+    return true;
+}
+
+bool AP_Tether::get_velocity_ned(uint8_t sysid, Vector3f &vel_ned) const
+{
+    const BeaconData* b = _find_beacon(sysid);
+    if (!b || !is_healthy(sysid)) return false;
+    vel_ned = b->velocity_ned;
+    return true;
+}
+
+bool AP_Tether::get_heading_deg(uint8_t sysid, float &heading_deg) const
+{
+    const BeaconData* b = _find_beacon(sysid);
+    if (!b || !is_healthy(sysid)) return false;
+    heading_deg = b->heading_deg;
+    return true;
 }

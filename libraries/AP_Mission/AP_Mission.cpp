@@ -421,7 +421,8 @@ bool AP_Mission::is_nav_cmd(const Mission_Command& cmd)
     return (cmd.id <= MAV_CMD_NAV_LAST ||
             cmd.id == MAV_CMD_NAV_SET_YAW_SPEED ||
             cmd.id == MAV_CMD_NAV_SCRIPT_TIME ||
-            cmd.id == MAV_CMD_NAV_ATTITUDE_TIME);
+            cmd.id == MAV_CMD_NAV_ATTITUDE_TIME ||
+            cmd.id == MAV_CMD_USER_1);
 }
 
 /// get_next_nav_cmd - gets next "navigation" command found at or after start_index
@@ -1209,6 +1210,23 @@ MAV_MISSION_RESULT AP_Mission::mavlink_int_to_mission_cmd(const mavlink_mission_
         cmd.content.nav_attitude_time.climb_rate = packet.x;
         break;
 
+    case MAV_CMD_USER_1: {   // tether beacon-relative waypoint
+        // param1 = beacon sysid, param2 = hold_sec (0 = loiter forever)
+        // param3 = forward offset m, param4 = right offset m, z = altitude m above home
+        // Offsets use param3/param4 (float) NOT x/y (int32_t) to avoid the 1e7 lat/lon
+        // conversion applied to x/y when receiving MISSION_ITEM instead of MISSION_ITEM_INT.
+        cmd.p1 = (uint16_t)packet.param1;
+        struct PACKED TetherWP { int16_t fwd_dm; int16_t right_dm; int16_t alt_dm; int16_t hold_sec; };
+        static_assert(sizeof(TetherWP) <= 10, "TetherWP exceeds 10-byte content limit");
+        TetherWP tw;
+        tw.fwd_dm   = (int16_t)roundf(packet.param3 * 10.0f);  // m -> dm
+        tw.right_dm = (int16_t)roundf(packet.param4 * 10.0f);  // m -> dm
+        tw.alt_dm   = (int16_t)roundf(packet.z      * 10.0f);  // m -> dm
+        tw.hold_sec = (int16_t)packet.param2;
+        memcpy(&cmd.content, &tw, sizeof(tw));
+        break;
+    }
+
     case MAV_CMD_DO_PAUSE_CONTINUE:
         cmd.p1 = packet.param1;
         break;
@@ -1310,6 +1328,7 @@ MAV_MISSION_RESULT AP_Mission::convert_MISSION_ITEM_to_MISSION_ITEM_INT(const ma
     case MAV_CMD_DO_DIGICAM_CONFIGURE:
     case MAV_CMD_NAV_ATTITUDE_TIME:
     case MAV_CMD_DO_GIMBAL_MANAGER_PITCHYAW:
+    case MAV_CMD_USER_1:   // offsets in param3/param4, x/y always zero
         mav_cmd.x = packet.x;
         mav_cmd.y = packet.y;
         break;
@@ -1698,6 +1717,21 @@ bool AP_Mission::mission_cmd_to_mavlink_int(const AP_Mission::Mission_Command& c
         packet.param4 = cmd.content.nav_attitude_time.yaw_deg;
         packet.x = cmd.content.nav_attitude_time.climb_rate;
         break;
+
+    case MAV_CMD_USER_1: {  // tether beacon-relative waypoint
+        packet.param1 = cmd.p1;
+        struct PACKED TetherWP { int16_t fwd_dm; int16_t right_dm; int16_t alt_dm; int16_t hold_sec; };
+        TetherWP tw;
+        memcpy(&tw, &cmd.content, sizeof(tw));
+        packet.param2  = (float)tw.hold_sec;
+        packet.param3  = tw.fwd_dm   * 0.1f;  // dm -> m
+        packet.param4  = tw.right_dm * 0.1f;  // dm -> m
+        packet.z       = tw.alt_dm   * 0.1f;  // dm -> m
+        packet.x       = 0;
+        packet.y       = 0;
+        packet.frame   = MAV_FRAME_GLOBAL_RELATIVE_ALT;
+        break;
+    }
 
     case MAV_CMD_DO_PAUSE_CONTINUE:
         packet.param1 = cmd.p1;
@@ -2450,6 +2484,8 @@ const char *AP_Mission::Mission_Command::type() const
         return "PauseContinue";
     case MAV_CMD_DO_GIMBAL_MANAGER_PITCHYAW:
         return "GimbalPitchYaw";
+    case MAV_CMD_USER_1:
+        return "TetherWP";
     default:
 #if CONFIG_HAL_BOARD == HAL_BOARD_SITL
         AP_HAL::panic("Mission command with ID %u has no string", id);

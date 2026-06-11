@@ -430,6 +430,7 @@ public:
         NAV_PAYLOAD_PLACE,
         NAV_SCRIPT_TIME,
         NAV_ATTITUDE_TIME,
+        TETHER_WP,              // beacon-relative offset waypoint (MAV_CMD_USER_1)
     };
 
     // set submode.  returns true on success, false on failure
@@ -516,6 +517,7 @@ private:
     void loiter_run();
     void loiter_to_alt_run();
     void nav_attitude_time_run();
+    void nav_tether_wp_run();
 
     Location loc_from_cmd(const AP_Mission::Mission_Command& cmd, const Location& default_loc) const;
 
@@ -531,6 +533,8 @@ private:
 
     void do_takeoff(const AP_Mission::Mission_Command& cmd);
     void do_nav_wp(const AP_Mission::Mission_Command& cmd);
+    void do_nav_tether_wp(const AP_Mission::Mission_Command& cmd);
+    bool verify_nav_tether_wp();
     bool set_next_wp(const AP_Mission::Mission_Command& current_cmd, const Location &default_loc);
     void do_land(const AP_Mission::Mission_Command& cmd);
     void do_loiter_unlimited(const AP_Mission::Mission_Command& cmd);
@@ -649,6 +653,25 @@ private:
         float climb_rate;   // climb rate in m/s. provided by mission command
         uint32_t start_ms;  // system time that nav attitude time command was received (used for timeout)
     } nav_attitude_time;
+
+    // tether beacon-relative waypoint state (MAV_CMD_USER_1)
+    struct {
+        uint8_t  sysid;               // beacon sysid for this waypoint
+        float    offset_fwd_cm;       // forward offset along beacon heading (cm)
+        float    offset_right_cm;     // right offset from beacon heading (cm)
+        float    target_alt_cm;       // target altitude, cm above EKF origin
+        bool     offset_valid;        // true once first target has been sent to pos_control
+        Vector3f last_target_neu_cm;  // last NEU target sent to pos_control
+        uint32_t beacon_lost_ms;      // time beacon was first lost (0 = beacon healthy)
+        int16_t  hold_sec;            // dwell time: 0 = loiter forever, >0 = advance after N s
+        uint32_t dwell_start_ms;      // time aircraft first entered acceptance zone (0 = outside)
+        // velocity-tracking state — set once settled within acceptance radius
+        bool     in_position;            // true: track velocity; false: chase absolute position
+        Vector3f dr_target_neu_cm;       // dead-reckoned target advanced by beacon velocity each tick
+        uint32_t last_run_ms;            // timestamp of last run tick, for dead-reckoning dt
+    } _tether_wp;
+
+    static constexpr uint32_t TETHER_WP_LOST_TIMEOUT_MS = 5000; // RTL after beacon absent this long
 };
 
 #if AUTOTUNE_ENABLED == ENABLED
