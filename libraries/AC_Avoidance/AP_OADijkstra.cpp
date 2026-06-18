@@ -27,6 +27,13 @@
 #define OA_DIJKSTRA_POLYGON_SHORTPATH_NOTSET_IDX        255     // index use to indicate we do not have a tentative short path for a node
 #define OA_DIJKSTRA_ERROR_REPORTING_INTERVAL_MS         5000    // failure messages sent to GCS every 5 seconds
 
+// breach-escape behaviour
+// when the vehicle is breaching a fence we override the normal Dijkstra output with a short
+// straight-line move to the nearest safe location.  the escape point sits beyond the breached
+// boundary by (polyfence_margin * BREACH_ESCAPE_MARGIN_MULT) to give the vehicle a safe buffer.
+// tune in SITL before flight; once happy this can be exposed as a parameter.
+static constexpr float BREACH_ESCAPE_MARGIN_MULT = 1.5f;
+
 /// Constructor
 AP_OADijkstra::AP_OADijkstra(AP_Int16 &options) :
         _options(options),
@@ -39,21 +46,98 @@ AP_OADijkstra::AP_OADijkstra(AP_Int16 &options) :
 }
 
 // calculate a destination to avoid fences
-// returns DIJKSTRA_STATE_SUCCESS and populates origin_new and destination_new if avoidance is required
-AP_OADijkstra::AP_OADijkstra_State AP_OADijkstra::update(const Location &current_loc, const Location &destination, Location& origin_new, Location& destination_new)
+// returns DIJKSTRA_STATE_SUCCESS and populates origin_new, destination_new and next_destination_new if avoidance is required
+// next_destination_new will be non-zero if there is a next destination
+// dest_to_next_dest_clear will be set to true if the path from (the input) destination to (input) next_destination is clear
+AP_OADijkstra::AP_OADijkstra_State AP_OADijkstra::update(const Location &current_loc,
+                                                         const Location &destination,
+                                                         const Location &next_destination,
+                                                         Location& origin_new,
+                                                         Location& destination_new,
+                                                         Location& next_destination_new,
+                                                         bool& dest_to_next_dest_clear)
 {
     WITH_SEMAPHORE(AP::fence()->polyfence().get_loaded_fence_semaphore());
 
     // avoidance is not required if no fences
     if (!some_fences_enabled()) {
+        dest_to_next_dest_clear = _dest_to_next_dest_clear = true;
         Write_OADijkstra(DIJKSTRA_STATE_NOT_REQUIRED, 0, 0, 0, destination, destination);
         return DIJKSTRA_STATE_NOT_REQUIRED;
     }
 
     // no avoidance required if destination is same as current location
     if (current_loc.same_latlon_as(destination)) {
+        // we do not check path to next destination so conservatively set to false
+        dest_to_next_dest_clear = _dest_to_next_dest_clear = false;
         Write_OADijkstra(DIJKSTRA_STATE_NOT_REQUIRED, 0, 0, 0, destination, destination);
         return DIJKSTRA_STATE_NOT_REQUIRED;
+    }
+
+    // breach-escape state management.
+    //
+    // strategy:
+    //   * while breached(): emit the escape destination as an OUTPUT OVERRIDE (bottom of update()).
+    //     the normal pipeline still runs, but any path it produces during the breach was computed
+    //     under PR #48's PERMISSIVE intersects_fence() - this is the known-good behaviour that lets
+    //     RTL recover after a breach.  The escape vector is only an output override; it must not
+    //     prevent the permissive Dijkstra result from being cached in the background.
+    //
+    //   * after breach clears: keep flying the escape vector until the vehicle reaches/passes the
+    //     cached escape destination.  "fence OK" only means we crossed the raw fence boundary; it
+    //     does not mean we have reached the safe stand-off point.
+    //
+    //   * once the escape point is reached: hold position and force a STRICT-mode replan before
+    //     handing control back to RTL.  this prevents fallback to a permissive-mode cached path
+    //     that can cut back through the fence and cause pendulum motion.
+    //
+    //   * once the escape point is reached: release this override and hand back to the normal PR #48
+    //     Dijkstra pipeline.  That existing permissive-while-breached behavior is the proven recovery
+    //     path; the escape vector should only get the aircraft out of the breached zone.
+    const AC_Fence *fence_for_breach = AC_Fence::get_singleton();
+    const bool currently_breached = (fence_for_breach != nullptr) && fence_for_breach->polyfence().breached();
+    if (currently_breached) {
+        // (re)calculate escape vector when entering breach, and also if we re-enter breach while
+        // waiting for strict handoff after a previous clear.  Without this, the vehicle can keep
+        // flying to a stale old escape point and pendulum back into the fence.
+        const bool recalc_escape = (!_breach_escape_active) || _breach_escape_waiting_strict_replan;
+        if (recalc_escape) {
+            if (!calc_breach_escape_point(current_loc, _breach_escape_destination)) {
+                // failed to compute - hover in place and warn the operator
+                const uint32_t now_ms = AP_HAL::millis();
+                if ((now_ms - _breach_escape_error_last_ms) > OA_DIJKSTRA_ERROR_REPORTING_INTERVAL_MS) {
+                    gcs().send_text(MAV_SEVERITY_CRITICAL, "Dijkstra: cannot calculate breach escape path");
+                    _breach_escape_error_last_ms = now_ms;
+                }
+                dest_to_next_dest_clear = _dest_to_next_dest_clear = false;
+                Write_OADijkstra(DIJKSTRA_STATE_ERROR, (uint8_t)AP_OADijkstra_Error::DIJKSTRA_ERROR_COULD_NOT_FIND_PATH, 0, 0, destination, destination);
+                return DIJKSTRA_STATE_ERROR;
+            }
+            _breach_escape_origin = current_loc;
+            _breach_escape_active = true;
+            _breach_escape_waiting_strict_replan = false;
+            // any graph/path computed in a previous (non-breached) iteration could now be stale.
+            // invalidate both visgraph and shortest path so they are rebuilt under breached()
+            // permissive fence logic while we are escaping.
+            _polyfence_visgraph_ok = false;
+            _shortest_path_ok = false;
+        }
+    } else if (_breach_escape_active) {
+        // breach is clear, but continue the short escape vector until the safe stand-off point has
+        // actually been reached.  This prevents handing RTL control back while still right on the
+        // circular fence boundary.  Do not invalidate _shortest_path_ok here: the normal pipeline
+        // has been running under PR #48's permissive breached() rules and should hand its cached
+        // recovery path to RTL once the escape point is reached.
+        const bool near_escape_destination = current_loc.get_distance(_breach_escape_destination) <= 2.0f;
+        const bool past_escape_destination = current_loc.past_interval_finish_line(_breach_escape_origin, _breach_escape_destination);
+        if (near_escape_destination || past_escape_destination) {
+            // do not release immediately; enforce strict-mode path replan first
+            _breach_escape_waiting_strict_replan = true;
+            // force visgraph/path rebuild in STRICT mode before releasing escape.  without this,
+            // we can accidentally reuse edges generated while breached() was true.
+            _polyfence_visgraph_ok = false;
+            _shortest_path_ok = false;
+        }
     }
 
     // check for inclusion polygon updates
@@ -77,11 +161,36 @@ AP_OADijkstra::AP_OADijkstra_State AP_OADijkstra::update(const Location &current
         _shortest_path_ok = false;
     }
 
+    // helper: if a breach is active we want to emit the escape destination rather than propagate
+    // a pipeline error.  the escape destination has already been validated by calc_breach_escape_point.
+    //
+    // CRITICAL: next_destination_new MUST be left at zero here.  AC_WPNav_OA::update_wpnav()'s
+    // Dijkstra/OA_SUCCESS branch unconditionally calls set_wp_destination_next_loc() whenever the
+    // returned next-destination is non-zero, which enables s-curve fast-corner blending (sets
+    // _flags.fast_waypoint = true in AC_WPNav::set_wp_destination_next).  The blended trajectory
+    // anticipates the next leg, so as the vehicle approaches the escape point it is already
+    // curving toward the original destination (home / mission WP).  When that next leg points
+    // straight back through the fence -- exactly the case during breach-escape -- the smoothed
+    // corner clips inside the fence and the vehicle re-breaches.  WPNav_OA does NOT consult
+    // dest_to_next_dest_clear here, so we must withhold the next destination outright.
+    auto emit_breach_escape = [&]() -> AP_OADijkstra_State {
+        origin_new = current_loc;
+        destination_new = _breach_escape_destination;
+        next_destination_new.zero();
+        dest_to_next_dest_clear = _dest_to_next_dest_clear = false;
+        Write_OADijkstra(DIJKSTRA_STATE_SUCCESS, 0, 1, 2, destination, _breach_escape_destination);
+        return DIJKSTRA_STATE_SUCCESS;
+    };
+
     // create inner polygon fence
     AP_OADijkstra_Error error_id;
     if (!_inclusion_polygon_with_margin_ok) {
         _inclusion_polygon_with_margin_ok = create_inclusion_polygon_with_margin(_polyfence_margin * 100.0f, error_id);
         if (!_inclusion_polygon_with_margin_ok) {
+            if (_breach_escape_active) {
+                return emit_breach_escape();
+            }
+            dest_to_next_dest_clear = _dest_to_next_dest_clear = false;
             report_error(error_id);
             Write_OADijkstra(DIJKSTRA_STATE_ERROR, (uint8_t)error_id, 0, 0, destination, destination);
             return DIJKSTRA_STATE_ERROR;
@@ -92,6 +201,10 @@ AP_OADijkstra::AP_OADijkstra_State AP_OADijkstra::update(const Location &current
     if (!_exclusion_polygon_with_margin_ok) {
         _exclusion_polygon_with_margin_ok = create_exclusion_polygon_with_margin(_polyfence_margin * 100.0f, error_id);
         if (!_exclusion_polygon_with_margin_ok) {
+            if (_breach_escape_active) {
+                return emit_breach_escape();
+            }
+            dest_to_next_dest_clear = _dest_to_next_dest_clear = false;
             report_error(error_id);
             Write_OADijkstra(DIJKSTRA_STATE_ERROR, (uint8_t)error_id, 0, 0, destination, destination);
             return DIJKSTRA_STATE_ERROR;
@@ -102,6 +215,10 @@ AP_OADijkstra::AP_OADijkstra_State AP_OADijkstra::update(const Location &current
     if (!_exclusion_circle_with_margin_ok) {
         _exclusion_circle_with_margin_ok = create_exclusion_circle_with_margin(_polyfence_margin * 100.0f, error_id);
         if (!_exclusion_circle_with_margin_ok) {
+            if (_breach_escape_active) {
+                return emit_breach_escape();
+            }
+            dest_to_next_dest_clear = _dest_to_next_dest_clear = false;
             report_error(error_id);
             Write_OADijkstra(DIJKSTRA_STATE_ERROR, (uint8_t)error_id, 0, 0, destination, destination);
             return DIJKSTRA_STATE_ERROR;
@@ -113,6 +230,10 @@ AP_OADijkstra::AP_OADijkstra_State AP_OADijkstra::update(const Location &current
         _polyfence_visgraph_ok = create_fence_visgraph(error_id);
         if (!_polyfence_visgraph_ok) {
             _shortest_path_ok = false;
+            if (_breach_escape_active) {
+                return emit_breach_escape();
+            }
+            dest_to_next_dest_clear = _dest_to_next_dest_clear = false;
             report_error(error_id);
             Write_OADijkstra(DIJKSTRA_STATE_ERROR, (uint8_t)error_id, 0, 0, destination, destination);
             return DIJKSTRA_STATE_ERROR;
@@ -132,27 +253,82 @@ AP_OADijkstra::AP_OADijkstra_State AP_OADijkstra::update(const Location &current
         }
     }
 
-    // rebuild path if destination has changed
+    // rebuild path only if destination has changed.  the shortest path itself does NOT depend
+    // on next_destination - next_destination only feeds _dest_to_next_dest_clear.  treating a
+    // next_destination change as a path-cache invalidation can be catastrophic when paired with
+    // the breach-escape override: during a breach WPNav_OA freezes _next_destination_oabak (because
+    // _oa_state moves to OA_SUCCESS, which skips the backup branch); on breach-clear set_wp_destination
+    // clears _next_destination to zero, and the very next iteration backs that zero up.  The resulting
+    // next_destination flip (non-zero -> zero) would invalidate the cache and force a strict-mode
+    // recompute, which fails for fence geometries the permissive-mode pre-breach calc could solve.
     if (!destination.same_latlon_as(_destination_prev)) {
         _destination_prev = destination;
+        _next_destination_prev = next_destination;
         _shortest_path_ok = false;
+        _breach_escape_waiting_strict_replan = false;
+        // if the destination has changed AND we are no longer inside a breached fence (i.e. the
+        // escape vector has already been delivered and we are sitting at the safe stand-off), the
+        // escape vector to the OLD destination is stale: emit_breach_escape() below would still
+        // command the vehicle to the old stand-off point and we'd never follow the fresh path to
+        // the new destination.  This is the path RTL takes after advancing INITIAL_CLIMB ->
+        // RETURN_HOME (new destination = home, which is reachable in strict mode).
+        // If we ARE still breached, keep the active escape state so the existing vector continues
+        // to fly the vehicle out of the fence before the new path takes over.
+        if (!currently_breached) {
+            _breach_escape_active = false;
+            _breach_escape_origin.zero();
+            _breach_escape_destination.zero();
+        }
+    } else if (!next_destination.same_latlon_as(_next_destination_prev)) {
+        // destination is unchanged but next_destination changed: keep the cached shortest path,
+        // just recompute the dest -> next_destination clear flag (cheap, single intersects_fence call).
+        _next_destination_prev = next_destination;
+        _dest_to_next_dest_clear = false;
+        if (!next_destination.is_zero()) {
+            Vector2f seg_start, seg_end;
+            if (destination.get_vector_xy_from_origin_NE(seg_start) && next_destination.get_vector_xy_from_origin_NE(seg_end)) {
+                _dest_to_next_dest_clear = !intersects_fence(seg_start, seg_end);
+            }
+        }
     }
 
     // calculate shortest path from current_loc to destination
     if (!_shortest_path_ok) {
         _shortest_path_ok = calc_shortest_path(current_loc, destination, error_id);
         if (!_shortest_path_ok) {
+            if (_breach_escape_active) {
+                return emit_breach_escape();
+            }
+            dest_to_next_dest_clear = _dest_to_next_dest_clear = false;
             report_error(error_id);
             Write_OADijkstra(DIJKSTRA_STATE_ERROR, (uint8_t)error_id, 0, 0, destination, destination);
             return DIJKSTRA_STATE_ERROR;
         }
+
         // start from 2nd point on path (first is the original origin)
         _path_idx_returned = 1;
+
+        // check if path from destination to next_destination intersects with a fence
+        _dest_to_next_dest_clear = false;
+        if (!next_destination.is_zero()) {
+            Vector2f seg_start, seg_end;
+            if (destination.get_vector_xy_from_origin_NE(seg_start) && next_destination.get_vector_xy_from_origin_NE(seg_end)) {
+                _dest_to_next_dest_clear = !intersects_fence(seg_start, seg_end);
+            }
+        }
+    }
+
+    // if a breach is active the breach-escape destination takes priority over whatever the
+    // pipeline produced.  the pipeline has still been run above so the visgraph and shortest-path
+    // are cached for use as soon as the breach clears.
+    if (_breach_escape_active) {
+        return emit_breach_escape();
     }
 
     // path has been created, return latest point
     Vector2f dest_pos;
-    if (get_shortest_path_point(_path_idx_returned, dest_pos)) {
+    const uint8_t path_length = (_path_numpoints > 0) ? (_path_numpoints - 1) : 0;
+    if ((_path_idx_returned < path_length) && get_shortest_path_point(_path_idx_returned, dest_pos)) {
 
         // for the first point return origin as current_loc
         Vector2f origin_pos;
@@ -171,6 +347,24 @@ AP_OADijkstra::AP_OADijkstra_State AP_OADijkstra::update(const Location &current
         destination_new.lat = temp_loc.lat;
         destination_new.lng = temp_loc.lng;
 
+        // if present also provide next destination if available to allow smooth cornering
+        next_destination_new.zero();
+        Vector2f next_dest_pos;
+        if ((_path_idx_returned + 1 < path_length) &&
+            get_shortest_path_point(_path_idx_returned + 1, next_dest_pos)) {
+            // convert offset from ekf origin to Location
+            Location next_loc(Vector3f{next_dest_pos.x, next_dest_pos.y, 0.0}, Location::AltFrame::ABOVE_ORIGIN);
+            next_destination_new = destination;
+            next_destination_new.lat = next_loc.lat;
+            next_destination_new.lng = next_loc.lng;
+        } else {
+            // return destination as next_destination
+            next_destination_new = destination;
+        }
+
+        // path to next destination clear state is still valid from previous calcs (was calced along with shortest path)
+        dest_to_next_dest_clear = _dest_to_next_dest_clear;
+
         // check if we should advance to next point for next iteration
         const bool near_oa_wp = current_loc.get_distance(destination_new) <= 2.0f;
         const bool past_oa_wp = current_loc.past_interval_finish_line(origin_new, destination_new);
@@ -183,6 +377,8 @@ AP_OADijkstra::AP_OADijkstra_State AP_OADijkstra::update(const Location &current
     }
 
     // we have reached the destination so avoidance is no longer required
+    // path to next destination clear state is still valid from previous calcs
+    dest_to_next_dest_clear = _dest_to_next_dest_clear;
     Write_OADijkstra(DIJKSTRA_STATE_NOT_REQUIRED, 0, 0, 0, destination, destination);
     return DIJKSTRA_STATE_NOT_REQUIRED;
 }
@@ -1023,6 +1219,177 @@ bool AP_OADijkstra::convert_node_to_point(const AP_OAVisGraph::OAItemID& id, Vec
 
     // we should never reach here but just in case
     return false;
+}
+
+// calculate a safe escape destination outside every breached fence at margin distance from the boundary
+// of the deepest breach.  on success the returned escape_loc has lat/lng of the safe point and the
+// altitude / frame of current_loc preserved (the escape stays at the vehicle's current altitude).
+// returns false if no breach is found or the position cannot be projected onto a boundary.
+bool AP_OADijkstra::calc_breach_escape_point(const Location &current_loc, Location &escape_loc) const
+{
+    const AC_Fence *fence = AC_Fence::get_singleton();
+    if (fence == nullptr) {
+        return false;
+    }
+
+    // get current position as NE offset (cm) from EKF origin
+    Vector2f current_pos_cm;
+    if (!current_loc.get_vector_xy_from_origin_NE(current_pos_cm)) {
+        return false;
+    }
+
+    // margin used for the escape point - allow a configurable buffer beyond the polyfence margin
+    const float escape_margin_cm = _polyfence_margin * 100.0f * BREACH_ESCAPE_MARGIN_MULT;
+
+    // pick the breach with the largest penetration depth.  on the next iteration any remaining
+    // breach will be handled in the same way until the vehicle is fully outside all fences.
+    float best_depth_cm = 0.0f;
+    Vector2f best_escape_pt_cm;
+    bool found_breach = false;
+
+    // helper lambda: project current_pos onto every edge of a polygon and return the closest point
+    auto find_closest_polygon_point = [&](const Vector2f *boundary, uint16_t num_points, Vector2f &closest_pt, float &min_dist_cm) -> bool {
+        if (boundary == nullptr || num_points < 3) {
+            return false;
+        }
+        float best_d_sq = FLT_MAX;
+        for (uint16_t j = 0; j < num_points; j++) {
+            const Vector2f &v = boundary[j];
+            const Vector2f &w = boundary[(j + 1) % num_points];
+            const Vector2f cp = Vector2f::closest_point(current_pos_cm, v, w);
+            const float d_sq = (cp - current_pos_cm).length_squared();
+            if (d_sq < best_d_sq) {
+                best_d_sq = d_sq;
+                closest_pt = cp;
+            }
+        }
+        min_dist_cm = sqrtf(best_d_sq);
+        return true;
+    };
+
+    // exclusion polygons: vehicle is INSIDE = breach.  escape outward through closest edge.
+    const uint8_t num_excl_polys = fence->polyfence().get_exclusion_polygon_count();
+    for (uint8_t i = 0; i < num_excl_polys; i++) {
+        uint16_t num_points = 0;
+        const Vector2f *boundary = fence->polyfence().get_exclusion_polygon(i, num_points);
+        if (boundary == nullptr || num_points < 3) {
+            continue;
+        }
+        if (!Polygon_outside(current_pos_cm, boundary, num_points)) {
+            // vehicle is inside this exclusion polygon
+            Vector2f closest_pt;
+            float depth_cm = 0.0f;
+            if (!find_closest_polygon_point(boundary, num_points, closest_pt, depth_cm)) {
+                continue;
+            }
+            Vector2f exit_dir = closest_pt - current_pos_cm;
+            if (exit_dir.is_zero()) {
+                // already exactly on the boundary - cannot determine direction reliably
+                continue;
+            }
+            exit_dir.normalize();
+            const Vector2f escape_pt_cm = closest_pt + (exit_dir * escape_margin_cm);
+            if (depth_cm > best_depth_cm) {
+                best_depth_cm = depth_cm;
+                best_escape_pt_cm = escape_pt_cm;
+                found_breach = true;
+            }
+        }
+    }
+
+    // exclusion circles: vehicle is INSIDE = breach.  escape radially outward.
+    const uint8_t num_excl_circles = fence->polyfence().get_exclusion_circle_count();
+    for (uint8_t i = 0; i < num_excl_circles; i++) {
+        Vector2f center_cm;
+        float radius_m;
+        if (!fence->polyfence().get_exclusion_circle(i, center_cm, radius_m)) {
+            continue;
+        }
+        const float radius_cm = radius_m * 100.0f;
+        const Vector2f from_center = current_pos_cm - center_cm;
+        const float dist_cm = from_center.length();
+        if (dist_cm < radius_cm) {
+            const float depth_cm = radius_cm - dist_cm;
+            Vector2f exit_dir;
+            if (dist_cm < 1.0f) {
+                // at (or essentially at) the centre - pick an arbitrary radial direction
+                exit_dir = Vector2f(1.0f, 0.0f);
+            } else {
+                exit_dir = from_center / dist_cm;
+            }
+            const Vector2f escape_pt_cm = center_cm + (exit_dir * (radius_cm + escape_margin_cm));
+            if (depth_cm > best_depth_cm) {
+                best_depth_cm = depth_cm;
+                best_escape_pt_cm = escape_pt_cm;
+                found_breach = true;
+            }
+        }
+    }
+
+    // inclusion polygons: vehicle is OUTSIDE = breach.  escape inward through closest edge.
+    const uint8_t num_incl_polys = fence->polyfence().get_inclusion_polygon_count();
+    for (uint8_t i = 0; i < num_incl_polys; i++) {
+        uint16_t num_points = 0;
+        const Vector2f *boundary = fence->polyfence().get_inclusion_polygon(i, num_points);
+        if (boundary == nullptr || num_points < 3) {
+            continue;
+        }
+        if (Polygon_outside(current_pos_cm, boundary, num_points)) {
+            Vector2f closest_pt;
+            float depth_cm = 0.0f;
+            if (!find_closest_polygon_point(boundary, num_points, closest_pt, depth_cm)) {
+                continue;
+            }
+            // entry direction: from outside toward the polygon edge, continued inward by escape_margin
+            Vector2f entry_dir = closest_pt - current_pos_cm;
+            if (entry_dir.is_zero()) {
+                continue;
+            }
+            entry_dir.normalize();
+            const Vector2f escape_pt_cm = closest_pt + (entry_dir * escape_margin_cm);
+            if (depth_cm > best_depth_cm) {
+                best_depth_cm = depth_cm;
+                best_escape_pt_cm = escape_pt_cm;
+                found_breach = true;
+            }
+        }
+    }
+
+    // inclusion circles: vehicle is OUTSIDE the circle = breach.  escape toward the centre.
+    const uint8_t num_incl_circles = fence->polyfence().get_inclusion_circle_count();
+    for (uint8_t i = 0; i < num_incl_circles; i++) {
+        Vector2f center_cm;
+        float radius_m;
+        if (!fence->polyfence().get_inclusion_circle(i, center_cm, radius_m)) {
+            continue;
+        }
+        const float radius_cm = radius_m * 100.0f;
+        const Vector2f from_center = current_pos_cm - center_cm;
+        const float dist_cm = from_center.length();
+        if (dist_cm > radius_cm) {
+            const float depth_cm = dist_cm - radius_cm;
+            const Vector2f from_center_unit = from_center / dist_cm;
+            // escape point sits inside the circle at radius - escape_margin from the centre
+            const float target_r_cm = MAX(0.0f, radius_cm - escape_margin_cm);
+            const Vector2f escape_pt_cm = center_cm + (from_center_unit * target_r_cm);
+            if (depth_cm > best_depth_cm) {
+                best_depth_cm = depth_cm;
+                best_escape_pt_cm = escape_pt_cm;
+                found_breach = true;
+            }
+        }
+    }
+
+    if (!found_breach) {
+        return false;
+    }
+
+    // convert escape point back to a Location, preserving current_loc's altitude / frame
+    Location temp_loc(Vector3f{best_escape_pt_cm.x, best_escape_pt_cm.y, 0.0f}, Location::AltFrame::ABOVE_ORIGIN);
+    escape_loc = current_loc;
+    escape_loc.lat = temp_loc.lat;
+    escape_loc.lng = temp_loc.lng;
+    return true;
 }
 #endif // AP_FENCE_ENABLED
 

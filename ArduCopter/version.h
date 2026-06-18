@@ -6,7 +6,7 @@
 
 #include "ap_version.h"
 
-#define THISFIRMWARE "MA_COPTER-V4.3.0.13_DEV.1"
+#define THISFIRMWARE "MA_COPTER-V4.3.0.16-OA-fastWP-fenceEscapeVector"
 
 // the following line is parsed by the autotest scripts
 #define FIRMWARE_VERSION 4, 3, 0, FIRMWARE_VERSION_TYPE_OFFICIAL
