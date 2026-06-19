@@ -675,6 +675,10 @@ private:
     void throttle_loop();
     void update_batt_compass(void);
     void loop_rate_logging();
+#if AP_PID_TUNE_MONITOR_ENABLED
+    void pid_tune_monitor_setup();
+    void pid_tune_monitor_update();
+#endif
     void ten_hz_logging_loop();
     void twentyfive_hz_logging();
     void three_hz_loop();

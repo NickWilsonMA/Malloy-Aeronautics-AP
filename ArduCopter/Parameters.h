@@ -11,6 +11,11 @@
  # include <AP_Follow/AP_Follow.h>
 #endif
 
+#include <AP_PIDTuneMonitor/AP_PIDTuneMonitor_config.h>
+#if AP_PID_TUNE_MONITOR_ENABLED
+ # include <AP_PIDTuneMonitor/AP_PIDTuneMonitor.h>
+#endif
+
 // Global parameter class.
 //
 class Parameters {
@@ -674,6 +679,10 @@ public:
     AP_Float takeoff_throttle_slew_time;
 #if HAL_WITH_ESC_TELEM && FRAME_CONFIG != HELI_FRAME
     AP_Int16 takeoff_rpm_min;
+#endif
+
+#if AP_PID_TUNE_MONITOR_ENABLED
+    AP_PIDTuneMonitor pid_tune_monitor;
 #endif
 };
 

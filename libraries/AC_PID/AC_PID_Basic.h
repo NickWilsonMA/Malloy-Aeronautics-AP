@@ -6,6 +6,7 @@
 #include <AP_Common/AP_Common.h>
 #include <AP_Param/AP_Param.h>
 #include "AP_PIDInfo.h"
+#include <AP_PIDTuneMonitor/AP_PIDTuneMonitor_config.h>
 
 /// @class	AC_PID_Basic
 /// @brief	Copter PID control class
@@ -72,6 +73,8 @@ public:
 
     const AP_PIDInfo& get_pid_info(void) const WARN_IF_UNUSED { return _pid_info; }
 
+    void set_tune_monitor_id(uint8_t id) { _tune_monitor_id = id; }
+
     // parameter var table
     static const struct AP_Param::GroupInfo var_info[];
 
@@ -95,4 +98,5 @@ protected:
     bool _reset_filter; // true when input filter should be reset during next call to set_input
 
     AP_PIDInfo _pid_info;
+    uint8_t _tune_monitor_id;
 };

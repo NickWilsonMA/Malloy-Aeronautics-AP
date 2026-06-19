@@ -676,6 +676,18 @@ struct PACKED log_PSCD {
     float accel;
 };
 
+// PID tuning monitor — integrator reset / relax / set events
+struct PACKED log_PTUN {
+    LOG_PACKET_HEADER;
+    uint64_t time_us;
+    uint8_t ctrl;
+    uint8_t ev;
+    int8_t limit;
+    float ibef;
+    float iaft;
+    float err;
+};
+
 // thread stack usage
 struct PACKED log_STAK {
     LOG_PACKET_HEADER;
@@ -1353,6 +1365,8 @@ LOG_STRUCTURE_FROM_VISUALODOM \
       "PSCE", "Qffffffff", "TimeUS,TPE,PE,DVE,TVE,VE,DAE,TAE,AE", "smmnnnooo", "F00000000" }, \
     { LOG_PSCD_MSG, sizeof(log_PSCD), \
       "PSCD", "Qffffffff", "TimeUS,TPD,PD,DVD,TVD,VD,DAD,TAD,AD", "smmnnnooo", "F00000000" }, \
+    { LOG_PTUN_MSG, sizeof(log_PTUN), \
+      "PTUN", "QBBbfff", "TimeUS,Ctrl,Ev,Limit,IBef,IAft,Err", "s---sss", "F------" , true }, \
     { LOG_STAK_MSG, sizeof(log_STAK), \
       "STAK", "QBBHHN", "TimeUS,Id,Pri,Total,Free,Name", "s#----", "F-----", true }, \
     { LOG_FILE_MSG, sizeof(log_File), \
@@ -1440,6 +1454,7 @@ enum LogMessages : uint8_t {
     LOG_PSCN_MSG,
     LOG_PSCE_MSG,
     LOG_PSCD_MSG,
+    LOG_PTUN_MSG,
     LOG_IDS_FROM_PRECLAND,
     LOG_IDS_FROM_AIS,
     LOG_STAK_MSG,

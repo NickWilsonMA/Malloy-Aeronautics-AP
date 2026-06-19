@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <cmath>
 #include <AC_PID/AP_PIDInfo.h>
+#include <AP_PIDTuneMonitor/AP_PIDTuneMonitor_config.h>
 
 /// @class	AC_PID_2D
 /// @brief	Copter PID control class
@@ -78,6 +79,8 @@ public:
     const AP_PIDInfo& get_pid_info_x(void) const { return _pid_info_x; }
     const AP_PIDInfo& get_pid_info_y(void) const { return _pid_info_y; }
 
+    void set_tune_monitor_ids(uint8_t x_id, uint8_t y_id) { _tune_monitor_id_x = x_id; _tune_monitor_id_y = y_id; }
+
     // parameter var table
     static const struct AP_Param::GroupInfo        var_info[];
 
@@ -102,4 +105,6 @@ protected:
 
     AP_PIDInfo _pid_info_x;
     AP_PIDInfo _pid_info_y;
+    uint8_t _tune_monitor_id_x;
+    uint8_t _tune_monitor_id_y;
 };

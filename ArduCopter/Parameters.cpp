@@ -1169,6 +1169,10 @@ const AP_Param::GroupInfo ParametersG2::var_info[] = {
     AP_GROUPINFO("TKOFF_RPM_MIN", 58, ParametersG2, takeoff_rpm_min, 0),
 #endif
 
+#if AP_PID_TUNE_MONITOR_ENABLED
+    AP_SUBGROUPINFO(pid_tune_monitor, "PTUN_", 59, ParametersG2, AP_PIDTuneMonitor),
+#endif
+
     // ID 62 is reserved for the SHOW_... parameters from the Skybrush fork at
     // https://github.com/skybrush-io/ardupilot
 

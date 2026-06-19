@@ -3,6 +3,7 @@
 
 #include <AP_Math/AP_Math.h>
 #include "AC_PID_2D.h"
+#include "AC_PID_TuneHook.h"
 
 #define AC_PID_2D_FILT_E_HZ_DEFAULT  20.0f   // default input filter frequency
 #define AC_PID_2D_FILT_D_HZ_DEFAULT  10.0f   // default input filter frequency
@@ -51,7 +52,9 @@ const AP_Param::GroupInfo AC_PID_2D::var_info[] = {
 
 // Constructor
 AC_PID_2D::AC_PID_2D(float initial_kP, float initial_kI, float initial_kD, float initial_kFF, float initial_imax, float initial_filt_E_hz, float initial_filt_D_hz, float dt) :
-    _dt(dt)
+    _dt(dt),
+    _tune_monitor_id_x(0),
+    _tune_monitor_id_y(0)
 {
     // load parameter values from eeprom
     AP_Param::setup_object_defaults(this, var_info);
@@ -168,9 +171,12 @@ Vector2f AC_PID_2D::get_ff()
 
 void AC_PID_2D::reset_I()
 {
-    _integrator.zero(); 
+    const Vector2f i_before = _integrator;
+    _integrator.zero();
     _pid_info_x.I = 0.0;
     _pid_info_y.I = 0.0;
+    ac_pid_tune_hook(_tune_monitor_id_x, AC_PID_TUNE_RESET_I, i_before.x, 0.0f, _pid_info_x.error, _pid_info_x.limit);
+    ac_pid_tune_hook(_tune_monitor_id_y, AC_PID_TUNE_RESET_I, i_before.y, 0.0f, _pid_info_y.error, _pid_info_y.limit);
 }
 
 // save_gains - save gains to eeprom
@@ -209,7 +215,10 @@ void AC_PID_2D::set_integrator(const Vector2f& error, const Vector2f& i)
 
 void AC_PID_2D::set_integrator(const Vector2f& i)
 {
+    const Vector2f i_before = _integrator;
     _integrator = i;
     _integrator.limit_length(_kimax);
+    ac_pid_tune_hook(_tune_monitor_id_x, AC_PID_TUNE_SET_I, i_before.x, _integrator.x, _pid_info_x.error, _pid_info_x.limit);
+    ac_pid_tune_hook(_tune_monitor_id_y, AC_PID_TUNE_SET_I, i_before.y, _integrator.y, _pid_info_y.error, _pid_info_y.limit);
 }
 

@@ -548,15 +548,30 @@ void AP_Logger::Write_PSCD(float pos_target, float pos, float vel_desired, float
 {
     const struct log_PSCD pkt{
         LOG_PACKET_HEADER_INIT(LOG_PSCD_MSG),
-            time_us         : AP_HAL::micros64(),
-            pos_target    : pos_target * 0.01f,
-            pos           : pos * 0.01f,
-            vel_desired   : vel_desired * 0.01f,
-            vel_target    : vel_target * 0.01f,
-            vel           : vel * 0.01f,
-            accel_desired : accel_desired * 0.01f,
-            accel_target  : accel_target * 0.01f,
-            accel         : accel * 0.01f
+        time_us         : AP_HAL::micros64(),
+        pos_target    : pos_target * 0.01f,
+        pos           : pos * 0.01f,
+        vel_desired   : vel_desired * 0.01f,
+        vel_target    : vel_target * 0.01f,
+        vel           : vel * 0.01f,
+        accel_desired : accel_desired * 0.01f,
+        accel_target  : accel_target * 0.01f,
+        accel         : accel * 0.01f
+    };
+    WriteBlock(&pkt, sizeof(pkt));
+}
+
+void AP_Logger::Write_PTUN(uint8_t ctrl, uint8_t ev, int8_t limit, float ibef, float iaft, float err)
+{
+    const struct log_PTUN pkt{
+        LOG_PACKET_HEADER_INIT(LOG_PTUN_MSG),
+        time_us : AP_HAL::micros64(),
+        ctrl    : ctrl,
+        ev      : ev,
+        limit   : limit,
+        ibef    : ibef,
+        iaft    : iaft,
+        err     : err,
     };
     WriteBlock(&pkt, sizeof(pkt));
 }

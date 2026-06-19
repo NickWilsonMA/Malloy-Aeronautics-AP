@@ -4,6 +4,7 @@
 #include <AP_Math/AP_Math.h>
 #include <AP_InternalError/AP_InternalError.h>
 #include "AC_PID_Basic.h"
+#include "AC_PID_TuneHook.h"
 
 #define AC_PID_Basic_FILT_E_HZ_DEFAULT 20.0f   // default input filter frequency
 #define AC_PID_Basic_FILT_E_HZ_MIN     0.01f   // minimum input filter frequency
@@ -53,7 +54,8 @@ const AP_Param::GroupInfo AC_PID_Basic::var_info[] = {
 
 // Constructor
 AC_PID_Basic::AC_PID_Basic(float initial_p, float initial_i, float initial_d, float initial_ff, float initial_imax, float initial_filt_E_hz, float initial_filt_D_hz, float dt) :
-    _dt(dt)
+    _dt(dt),
+    _tune_monitor_id(0)
 {
     // load parameter values from eeprom
     AP_Param::setup_object_defaults(this, var_info);
@@ -141,8 +143,10 @@ void AC_PID_Basic::update_i(bool limit_neg, bool limit_pos)
 
 void AC_PID_Basic::reset_I()
 {
-    _integrator = 0.0; 
+    const float i_before = _integrator;
+    _integrator = 0.0;
     _pid_info.I = 0.0;
+    ac_pid_tune_hook(_tune_monitor_id, AC_PID_TUNE_RESET_I, i_before, 0.0f, _pid_info.error, _pid_info.limit);
 }
 
 // save_gains - save gains to eeprom
@@ -181,6 +185,8 @@ void AC_PID_Basic::set_integrator(float error, float i)
 
 void AC_PID_Basic::set_integrator(float i)
 {
+    const float i_before = _integrator;
     _integrator = constrain_float(i, -_kimax, _kimax);
     _pid_info.I = _integrator;
+    ac_pid_tune_hook(_tune_monitor_id, AC_PID_TUNE_SET_I, i_before, _integrator, _pid_info.error, _pid_info.limit);
 }

@@ -31,6 +31,7 @@ def build(bld):
             'AP_OSD',
             'AC_AutoTune',
             'AP_KDECAN',
+            'AP_PIDTuneMonitor',
         ],
     )
 
@@ -38,7 +39,7 @@ def build(bld):
         program_name='arducopter',
         program_groups=['bin', 'copter'],
         use=vehicle + '_libs',
-        defines=['FRAME_CONFIG=MULTICOPTER_FRAME'],
+        defines=['FRAME_CONFIG=MULTICOPTER_FRAME', 'AP_PID_TUNE_MONITOR_ENABLED=1'],
         )
 
     bld.ap_program(

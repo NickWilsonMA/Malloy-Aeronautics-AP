@@ -3,6 +3,7 @@
 
 #include <AP_Math/AP_Math.h>
 #include "AC_PID.h"
+#include "AC_PID_TuneHook.h"
 
 const AP_Param::GroupInfo AC_PID::var_info[] = {
     // @Param: P
@@ -70,7 +71,8 @@ const AP_Param::GroupInfo AC_PID::var_info[] = {
 // Constructor
 AC_PID::AC_PID(float initial_p, float initial_i, float initial_d, float initial_ff, float initial_imax, float initial_filt_T_hz, float initial_filt_E_hz, float initial_filt_D_hz,
                float dt, float initial_srmax, float initial_srtau):
-    _dt(dt)
+    _dt(dt),
+    _tune_monitor_id(0)
 {
     // load parameter values from eeprom
     AP_Param::setup_object_defaults(this, var_info);
@@ -271,8 +273,10 @@ float AC_PID::get_ff()
 
 void AC_PID::reset_I()
 {
+    const float i_before = _integrator;
     _integrator = 0.0;
     _pid_info.I = 0.0;
+    ac_pid_tune_hook(_tune_monitor_id, AC_PID_TUNE_RESET_I, i_before, 0.0f, _pid_info.error, _pid_info.limit);
 }
 
 void AC_PID::load_gains()
@@ -346,19 +350,25 @@ void AC_PID::set_integrator(float target, float measurement, float integrator)
 
 void AC_PID::set_integrator(float error, float integrator)
 {
+    const float i_before = _integrator;
     _integrator = constrain_float(integrator - error * _kp, -_kimax, _kimax);
     _pid_info.I = _integrator;
+    ac_pid_tune_hook(_tune_monitor_id, AC_PID_TUNE_SET_I, i_before, _integrator, error, _pid_info.limit);
 }
 
 void AC_PID::set_integrator(float integrator)
 {
+    const float i_before = _integrator;
     _integrator = constrain_float(integrator, -_kimax, _kimax);
     _pid_info.I = _integrator;
+    ac_pid_tune_hook(_tune_monitor_id, AC_PID_TUNE_SET_I, i_before, _integrator, _pid_info.error, _pid_info.limit);
 }
 
 void AC_PID::relax_integrator(float integrator, float time_constant)
 {
+    const float i_before = _integrator;
     integrator = constrain_float(integrator, -_kimax, _kimax);
     _integrator = _integrator + (integrator - _integrator) * (_dt / (_dt + time_constant));
     _pid_info.I = _integrator;
+    ac_pid_tune_hook(_tune_monitor_id, AC_PID_TUNE_RELAX_I, i_before, _integrator, _pid_info.error, _pid_info.limit);
 }

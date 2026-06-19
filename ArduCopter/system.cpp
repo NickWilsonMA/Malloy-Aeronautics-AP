@@ -486,6 +486,10 @@ void Copter::allocate_motors(void)
     }
     AP_Param::load_object_from_eeprom(loiter_nav, loiter_nav->var_info);
 
+#if AP_PID_TUNE_MONITOR_ENABLED
+    pid_tune_monitor_setup();
+#endif
+
 #if MODE_CIRCLE_ENABLED == ENABLED
     circle_nav = new AC_Circle(inertial_nav, *ahrs_view, *pos_control);
     if (circle_nav == nullptr) {

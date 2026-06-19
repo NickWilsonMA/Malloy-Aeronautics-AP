@@ -15,6 +15,7 @@
 #define AC_PID_RESET_TC          0.16f   // Time constant for integrator reset decay to zero
 
 #include "AP_PIDInfo.h"
+#include <AP_PIDTuneMonitor/AP_PIDTuneMonitor_config.h>
 
 /// @class	AC_PID
 /// @brief	Copter PID control class
@@ -119,6 +120,8 @@ public:
 
     const AP_PIDInfo& get_pid_info(void) const { return _pid_info; }
 
+    void set_tune_monitor_id(uint8_t id) { _tune_monitor_id = id; }
+
     // parameter var table
     static const struct AP_Param::GroupInfo var_info[];
 
@@ -157,4 +160,5 @@ protected:
     int8_t _slew_limit_scale;
 
     AP_PIDInfo _pid_info;
+    uint8_t _tune_monitor_id;
 };
