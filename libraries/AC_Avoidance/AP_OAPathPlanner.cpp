@@ -169,6 +169,18 @@ bool AP_OAPathPlanner::start_thread()
     return true;
 }
 
+// true while Dijkstra is holding the vehicle at the breach-escape stand-off because strict-mode
+// replanning to the current destination is failing (typically the mode-supplied destination is
+// inside the exclusion fence we just escaped from).  WPNav_OA polls this to allow the calling
+// mode to advance past an unreachable phase target.
+bool AP_OAPathPlanner::breach_escape_holding() const
+{
+    if (_oadijkstra == nullptr) {
+        return false;
+    }
+    return _oadijkstra->breach_escape_holding();
+}
+
 // helper function to map OABendyType to OAPathPlannerUsed
 AP_OAPathPlanner::OAPathPlannerUsed AP_OAPathPlanner::map_bendytype_to_pathplannerused(AP_OABendyRuler::OABendyType bendy_type)
 {

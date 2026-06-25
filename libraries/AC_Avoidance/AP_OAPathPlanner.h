@@ -80,6 +80,11 @@ public:
 
     uint16_t get_options() const { return _options;}
 
+    // true while Dijkstra is holding the vehicle at the breach-escape stand-off because strict-mode
+    // replanning to the current destination is failing.  Used by AC_WPNav_OA so that the calling
+    // mode (e.g. RTL) can advance past an unreachable phase target instead of looping forever.
+    bool breach_escape_holding() const;
+
     static const struct AP_Param::GroupInfo var_info[];
 
 private:
