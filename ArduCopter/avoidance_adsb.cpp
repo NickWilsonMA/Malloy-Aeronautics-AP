@@ -51,9 +51,9 @@ MAV_COLLISION_ACTION AP_Avoidance_Copter::handle_avoidance(const AP_Avoidance::O
                 break;
 
             case MAV_COLLISION_ACTION_HOVER:
-                // attempt to switch to Loiter, if this fails (i.e. flying in manual mode with bad position) do nothing
+                // attempt to switch to Guided, if this fails (i.e. flying in manual mode with bad position) do nothing
 
-				// Don't switch, if we're already in guided
+				// Don't switch, if we're already in Guided mode
 				if (copter.flightmode->mode_number() != Mode::Number::GUIDED) {
                     if (!copter.set_mode(Mode::Number::GUIDED, ModeReason::AVOIDANCE)) {
                         actual_action = MAV_COLLISION_ACTION_NONE;
