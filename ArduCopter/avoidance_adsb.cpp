@@ -58,7 +58,7 @@ MAV_COLLISION_ACTION AP_Avoidance_Copter::handle_avoidance(const AP_Avoidance::O
                     if (!copter.set_mode(Mode::Number::GUIDED, ModeReason::AVOIDANCE)) {
                         actual_action = MAV_COLLISION_ACTION_NONE;
                     } else {
-						gcs().send_text(MAV_SEVERITY_WARNING, "OBSTACLE DETECTED - SWITCHING TO 'GUIDED'...");
+						gcs().send_text(MAV_SEVERITY_WARNING, "ADS-B AVOID - Vehicle detected");
 					}
 				}
                 break;
@@ -128,7 +128,7 @@ void AP_Avoidance_Copter::handle_recovery(RecoveryAction recovery_action)
             case RecoveryAction::RESUME_IF_AUTO_ELSE_LOITER:
                 if (prev_control_mode == Mode::Number::AUTO) {
                     set_mode_else_try_RTL_else_LAND(Mode::Number::AUTO);
-					gcs().send_text(MAV_SEVERITY_WARNING, "OBSTACLE CLEARED - RESUMING 'AUTO'...");
+					gcs().send_text(MAV_SEVERITY_WARNING, "ADS-B AVOID - Vehicle Cleared");
                 }
                 break;
 
