@@ -57,7 +57,7 @@ public:
         RESUME_PREVIOUS_FLIGHTMODE = 1,
         RTL                        = 2,
         RESUME_IF_AUTO_ELSE_LOITER = 3,
-		GUIDED					   = 4
+		DO_NOTHING				   = 4
     };
 
     // obstacle class to hold latest information for a known obstacles

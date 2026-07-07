@@ -135,10 +135,6 @@ void AP_Avoidance_Copter::handle_recovery(RecoveryAction recovery_action)
                 }
                 break;
 
-			case RecoveryAction::GUIDED:
-				copter.set_mode(Mode::Number::GUIDED, ModeReason::AVOIDANCE);
-				break;
-
             default:
                 break;
             } // switch
