@@ -109,6 +109,9 @@ void AP_Avoidance_Copter::handle_recovery(RecoveryAction recovery_action)
         AP::logger().Write_Error(LogErrorSubsystem::FAILSAFE_ADSB,
                                  LogErrorCode::ERROR_RESOLVED);
 
+		// Clear previously cached static obstacle data
+		clear_cached_obstacle();
+
         // restore flight mode if requested and user has not changed mode since
         if (copter.control_mode_reason == ModeReason::AVOIDANCE) {
             switch (recovery_action) {
@@ -131,6 +134,10 @@ void AP_Avoidance_Copter::handle_recovery(RecoveryAction recovery_action)
 					gcs().send_text(MAV_SEVERITY_WARNING, "ADS-B AVOID - Vehicle Cleared");
                 }
                 break;
+
+			case RecoveryAction::GUIDED:
+				copter.set_mode(Mode::Number::GUIDED, ModeReason::AVOIDANCE);
+				break;
 
             default:
                 break;

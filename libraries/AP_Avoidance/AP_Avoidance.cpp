@@ -170,9 +170,10 @@ void AP_Avoidance::deinit(void)
         delete [] _obstacles;
         _obstacles = nullptr;
         _obstacles_allocated = 0;
-        handle_recovery(RecoveryAction::RTL);
+        //handle_recovery(RecoveryAction::RTL);
     }
     _obstacle_count = 0;
+	clear_cached_obstacle();
 }
 
 bool AP_Avoidance::check_startup()
@@ -489,7 +490,8 @@ void AP_Avoidance::check_for_threats()
 		{
 			float obstacle_location_delta =
 				_obstacles[i]._location.get_distance(_current_most_serious_threat_location);
-			if (obstacle_location_delta < MAX_OBSTACLE_LOCATION_DELTA)
+			if (obstacle_location_delta < MAX_OBSTACLE_LOCATION_DELTA ||
+				_obstacles[i]._velocity.length() < MAX_OBSTACLE_VELOCITY)
 			{
 				if (_obstacles[i].threat_level != MAV_COLLISION_THREAT_LEVEL_HIGH)
 				{
