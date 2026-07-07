@@ -175,6 +175,7 @@ void AP_Avoidance::deinit(void)
     _obstacle_count = 0;
 	clear_cached_obstacle();
 	_threat_level = MAV_COLLISION_THREAT_LEVEL_NONE;
+	_latest_action = MAV_COLLISION_ACTION_NONE;
 }
 
 bool AP_Avoidance::check_startup()
