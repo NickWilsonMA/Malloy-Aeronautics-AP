@@ -174,6 +174,7 @@ void AP_Avoidance::deinit(void)
     }
     _obstacle_count = 0;
 	clear_cached_obstacle();
+	_threat_level = MAV_COLLISION_THREAT_LEVEL_NONE;
 }
 
 bool AP_Avoidance::check_startup()
@@ -580,6 +581,7 @@ void AP_Avoidance::handle_avoidance_local(AP_Avoidance::Obstacle *threat)
         if (((now - _last_state_change_ms) > AP_AVOIDANCE_STATE_RECOVERY_TIME_MS) || (new_threat_level > _threat_level)) {
             // handle recovery from high threat level
             if (_threat_level == MAV_COLLISION_THREAT_LEVEL_HIGH) {
+				clear_cached_obstacle();
                 handle_recovery(RecoveryAction(_fail_recovery.get()));
                 _latest_action = MAV_COLLISION_ACTION_NONE;
             }
