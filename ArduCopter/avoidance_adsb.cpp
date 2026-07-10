@@ -129,13 +129,12 @@ void AP_Avoidance_Copter::handle_recovery(RecoveryAction recovery_action)
                 break;
 
             case RecoveryAction::RESUME_IF_AUTO_ELSE_LOITER:
+				gcs().send_text(MAV_SEVERITY_WARNING, "ADS-B AVOID - Vehicle Cleared");
                 if (prev_control_mode == Mode::Number::AUTO) {
-                    set_mode_else_try_RTL_else_LAND(Mode::Number::AUTO);
-					gcs().send_text(MAV_SEVERITY_WARNING, "ADS-B AVOID - Vehicle Cleared");
+                    set_mode_else_try_GUIDED(Mode::Number::AUTO);
                 }
 				else if (prev_control_mode == Mode::Number::RTL) {
-					// TODO: We shouldn't "else_LAND" at all!
-					set_mode_else_try_RTL_else_LAND(Mode::Number::RTL);
+					set_mode_else_try_GUIDED(Mode::Number::RTL);
 				}
                 break;
 
@@ -151,9 +150,16 @@ void AP_Avoidance_Copter::set_mode_else_try_RTL_else_LAND(Mode::Number mode)
     if (!copter.set_mode(mode, ModeReason::AVOIDANCE_RECOVERY)) {
         // on failure RTL or LAND
         if (!copter.set_mode(Mode::Number::RTL, ModeReason::AVOIDANCE_RECOVERY)) {
-            //copter.set_mode(Mode::Number::LAND, ModeReason::AVOIDANCE_RECOVERY);
-			copter.set_mode(Mode::Number::GUIDED, ModeReason::AVOIDANCE_RECOVERY);
+            copter.set_mode(Mode::Number::LAND, ModeReason::AVOIDANCE_RECOVERY);
         }
+    }
+}
+
+void AP_Avoidance_Copter::set_mode_else_try_GUIDED(Mode::Number mode)
+{
+    if (!copter.set_mode(mode, ModeReason::AVOIDANCE_RECOVERY)) {
+        // on failure try GUIDED
+		copter.set_mode(Mode::Number::GUIDED, ModeReason::AVOIDANCE_RECOVERY);
     }
 }
 
