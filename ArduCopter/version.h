@@ -6,7 +6,7 @@
 
 #include "ap_version.h"
 
-#define THISFIRMWARE "MA-Copter-4.3.0.16-rc.3"
+#define THISFIRMWARE "MA-Copter-4.3.0.16"
 
 // the following line is parsed by the autotest scripts
 #define FIRMWARE_VERSION 4, 3, 0, FIRMWARE_VERSION_TYPE_OFFICIAL
