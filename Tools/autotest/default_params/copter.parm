@@ -115,7 +115,7 @@ AVD_F_RCVRY             3.000
 AVD_F_TIME              30.000
 AVD_F_ALT_MIN   0.000
 
-
+RC12_OPTION		38.000
 
 # flightmodes
 # switch 1 Circle
