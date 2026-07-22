@@ -51,12 +51,16 @@ MAV_COLLISION_ACTION AP_Avoidance_Copter::handle_avoidance(const AP_Avoidance::O
                 break;
 
             case MAV_COLLISION_ACTION_HOVER:
-                // attempt to switch to Loiter, if this fails (i.e. flying in manual mode with bad position) do nothing
-                if (failsafe_state_change) {
-                    if (!copter.set_mode(Mode::Number::LOITER, ModeReason::AVOIDANCE)) {
+                // attempt to switch to Guided, if this fails (i.e. flying in manual mode with bad position) do nothing
+
+				// Don't switch, if we're already in Guided mode
+				if (copter.flightmode->mode_number() != Mode::Number::GUIDED) {
+                    if (!copter.set_mode(Mode::Number::GUIDED, ModeReason::AVOIDANCE)) {
                         actual_action = MAV_COLLISION_ACTION_NONE;
-                    }
-                }
+                    } else {
+						gcs().send_text(MAV_SEVERITY_WARNING, "ADS-B AVOID - Vehicle detected");
+					}
+				}
                 break;
 
             case MAV_COLLISION_ACTION_ASCEND_OR_DESCEND:
@@ -105,6 +109,9 @@ void AP_Avoidance_Copter::handle_recovery(RecoveryAction recovery_action)
         AP::logger().Write_Error(LogErrorSubsystem::FAILSAFE_ADSB,
                                  LogErrorCode::ERROR_RESOLVED);
 
+		// Clear previously cached static obstacle data
+		clear_cached_obstacle();
+
         // restore flight mode if requested and user has not changed mode since
         if (copter.control_mode_reason == ModeReason::AVOIDANCE) {
             switch (recovery_action) {
@@ -122,9 +129,13 @@ void AP_Avoidance_Copter::handle_recovery(RecoveryAction recovery_action)
                 break;
 
             case RecoveryAction::RESUME_IF_AUTO_ELSE_LOITER:
+				gcs().send_text(MAV_SEVERITY_WARNING, "ADS-B AVOID - Vehicle Cleared");
                 if (prev_control_mode == Mode::Number::AUTO) {
-                    set_mode_else_try_RTL_else_LAND(Mode::Number::AUTO);
+                    set_mode_else_try_GUIDED(Mode::Number::AUTO);
                 }
+				else if (prev_control_mode == Mode::Number::RTL) {
+					set_mode_else_try_GUIDED(Mode::Number::RTL);
+				}
                 break;
 
             default:
@@ -141,6 +152,14 @@ void AP_Avoidance_Copter::set_mode_else_try_RTL_else_LAND(Mode::Number mode)
         if (!copter.set_mode(Mode::Number::RTL, ModeReason::AVOIDANCE_RECOVERY)) {
             copter.set_mode(Mode::Number::LAND, ModeReason::AVOIDANCE_RECOVERY);
         }
+    }
+}
+
+void AP_Avoidance_Copter::set_mode_else_try_GUIDED(Mode::Number mode)
+{
+    if (!copter.set_mode(mode, ModeReason::AVOIDANCE_RECOVERY)) {
+        // on failure try GUIDED
+		copter.set_mode(Mode::Number::GUIDED, ModeReason::AVOIDANCE_RECOVERY);
     }
 }
 

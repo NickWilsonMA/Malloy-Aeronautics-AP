@@ -33,6 +33,9 @@
 
 #define AP_AVOIDANCE_ESCAPE_TIME_SEC                        2       // vehicle runs from thread for 2 seconds
 
+#define MAX_OBSTACLE_LOCATION_DELTA							1.0f	// used to determine obstacle persistence
+#define MAX_OBSTACLE_VELOCITY								0.1f	// used to determine obstacle persistence
+
 class AP_Avoidance {
 public:
 
@@ -54,6 +57,7 @@ public:
         RESUME_PREVIOUS_FLIGHTMODE = 1,
         RTL                        = 2,
         RESUME_IF_AUTO_ELSE_LOITER = 3,
+		DO_NOTHING				   = 4
     };
 
     // obstacle class to hold latest information for a known obstacles
@@ -147,6 +151,12 @@ protected:
     static Vector3f perpendicular_xyz(const Location &p1, const Vector3f &v1, const Location &p2);
     static Vector2f perpendicular_xy(const Location &p1, const Vector3f &v1, const Location &p2);
 
+	void clear_cached_obstacle()
+	{
+		_current_most_serious_threat_id = 0xFFFFFFFF;
+		_current_most_serious_threat_location.zero();
+	}
+
 private:
 
     void send_collision_all(const AP_Avoidance::Obstacle &threat, MAV_COLLISION_ACTION behaviour) const;
@@ -189,6 +199,10 @@ private:
     uint8_t _obstacle_count;
     int8_t _current_most_serious_threat;
     MAV_COLLISION_ACTION _latest_action = MAV_COLLISION_ACTION_NONE;
+
+	// for keeping track of the most recently encountered threat that caused panic
+	uint32_t _current_most_serious_threat_id;
+	Location _current_most_serious_threat_location;
 
     // external references
     class AP_ADSB &_adsb;

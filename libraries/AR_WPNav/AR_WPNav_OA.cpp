@@ -46,9 +46,12 @@ void AR_WPNav_OA::update(float dt)
 
     AP_OAPathPlanner *oa = AP_OAPathPlanner::get_singleton();
     if (oa != nullptr) {
-        Location oa_origin_new, oa_destination_new;
+        Location oa_origin_new, oa_destination_new, oa_next_destination_new;
+        // Rover does not currently use the next-destination / fast-waypoint plumbing
+        const Location next_destination_unused;
+        bool dest_to_next_dest_clear_unused = false;
         AP_OAPathPlanner::OAPathPlannerUsed path_planner_used;
-        const AP_OAPathPlanner::OA_RetState oa_retstate = oa->mission_avoidance(current_loc, _origin_oabak, _destination_oabak, oa_origin_new, oa_destination_new, path_planner_used);
+        const AP_OAPathPlanner::OA_RetState oa_retstate = oa->mission_avoidance(current_loc, _origin_oabak, _destination_oabak, next_destination_unused, oa_origin_new, oa_destination_new, oa_next_destination_new, dest_to_next_dest_clear_unused, path_planner_used);
         switch (oa_retstate) {
 
         case AP_OAPathPlanner::OA_NOT_REQUIRED:

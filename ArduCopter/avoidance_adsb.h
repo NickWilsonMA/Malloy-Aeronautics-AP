@@ -19,6 +19,8 @@ private:
     // helper function to set modes and always succeed
     void set_mode_else_try_RTL_else_LAND(Mode::Number mode);
 
+	void set_mode_else_try_GUIDED(Mode::Number mode);
+
     // get minimum limit altitude allowed on descend
     int32_t get_altitude_minimum() const;
 
