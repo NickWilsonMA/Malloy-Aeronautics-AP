@@ -757,67 +757,6 @@ bool Copter::get_rate_bf_targets(Vector3f& rate_bf_targets) const
     return true;
 }
 
-void Copter::fast_debug_loop()
-{
-	auto previous_desired_spool_state = _last_known_desired_spool_state;
-	_last_known_desired_spool_state = motors->get_desired_spool_state();
-	if (_last_known_desired_spool_state != previous_desired_spool_state) {
-		switch (_last_known_desired_spool_state) {
-			case AP_Motors::DesiredSpoolState::SHUT_DOWN:
-			gcs().send_text(MAV_SEVERITY_WARNING, "Desired Spool State: SHUT_DOWN");
-			break;
-			case AP_Motors::DesiredSpoolState::GROUND_IDLE:
-			gcs().send_text(MAV_SEVERITY_WARNING, "Desired Spool State: GROUND_IDLE");
-			break;
-			case AP_Motors::DesiredSpoolState::THROTTLE_UNLIMITED:
-			gcs().send_text(MAV_SEVERITY_WARNING, "Desired Spool State: THROTTLE_UNLIMITED");
-			break;
-			default:
-			gcs().send_text(MAV_SEVERITY_WARNING, "Desired Spool State: UNKNOWN");
-			break;
-		}
-	}
-
-	auto previous_spool_state = _last_known_spool_state;
-	_last_known_spool_state = motors->get_spool_state();
-	if (_last_known_spool_state != previous_spool_state) {
-		switch (_last_known_spool_state) {
-			case AP_Motors::SpoolState::SHUT_DOWN:
-			gcs().send_text(MAV_SEVERITY_WARNING, "Spool State: SHUT_DOWN");
-			break;
-			case AP_Motors::SpoolState::GROUND_IDLE:
-			gcs().send_text(MAV_SEVERITY_WARNING, "Spool State: GROUND_IDLE");
-			break;
-			case AP_Motors::SpoolState::SPOOLING_UP:
-			gcs().send_text(MAV_SEVERITY_WARNING, "Spool State: SPOOLING_UP");
-			break;
-			case AP_Motors::SpoolState::THROTTLE_UNLIMITED:
-			gcs().send_text(MAV_SEVERITY_WARNING, "Spool State: THROTTLE_UNLIMITED");
-			break;
-			case AP_Motors::SpoolState::SPOOLING_DOWN:
-			gcs().send_text(MAV_SEVERITY_WARNING, "Spool State: SPOOLING_DOWN");
-			break;
-			default:
-			gcs().send_text(MAV_SEVERITY_WARNING, "Spool State: UNKNOWN");
-			break;
-		}
-	}
-
-	/*
-	if (!_takeoff_complete_reported && mode_auto.is_takeoff_complete()) {
-		_takeoff_complete_reported = true;
-		gcs().send_text(MAV_SEVERITY_WARNING, "TAKEOFF COMPLETE");
-	}
-
-	if (!_land_complete_reported && mode_auto.is_land_complete()) {
-		_land_complete_reported = true;
-		gcs().send_text(MAV_SEVERITY_WARNING, "LAND COMPLETE");
-	}
-	*/
-
-	_fast_debug_cycle_count++;
-}
-
 /*
   constructor for main Copter class
  */
