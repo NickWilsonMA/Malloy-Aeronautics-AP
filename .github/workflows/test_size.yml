@@ -65,10 +65,13 @@ jobs:
       matrix:
         toolchain: [chibios]
         config: [MatekH743, mRoControlZeroOEMH7, CubeOrange]
+	env:
+		BASE_BRANCH: ${{ github.event.pull_request.base.ref || 'MA-4.3.0.X' }}
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: ${{ github.event.pull_request.base.ref }}
+          #ref: ${{ github.event.pull_request.base.ref }}
+          ref: ${{ env.BASE_BRANCH }}
           path: base_branch
           submodules: 'recursive'
       # Put ccache into github cache for faster build
@@ -86,7 +89,8 @@ jobs:
       - name: setup ccache
         run: |
           . base_branch/.github/workflows/ccache.env
-      - name: Build ${{ github.event.pull_request.base.ref }} ${{matrix.config}} ${{ matrix.toolchain }}
+      #- name: Build ${{ github.event.pull_request.base.ref }} ${{matrix.config}} ${{ matrix.toolchain }} 
+      - name: Build ${{ env.BASE_BRANCH }} ${{matrix.config}} ${{ matrix.toolchain }}
         env:
           CI_BUILD_TARGET: ${{matrix.config}}
         shell: bash
@@ -114,7 +118,8 @@ jobs:
 
           # build a set of binaries without symbols so we can check if
           #  the binaries have changed.
-          echo [`date`] Building ${{ github.event.pull_request.base.ref }} with no versions
+          #echo [`date`] Building ${{ github.event.pull_request.base.ref }} with no versions
+          echo [`date`] Building ${{ env.BASE_BRANCH }} with no versions
 
           NO_VERSIONS_DIR="$GITHUB_WORKSPACE/base_branch_bin_no_versions"
           mkdir "$NO_VERSIONS_DIR"
@@ -130,7 +135,8 @@ jobs:
 
           cp -r $BIN_SRC/* "$NO_VERSIONS_DIR"
 
-          echo [`date`] Built ${{ github.event.pull_request.base.ref }} with no versions
+          #echo [`date`] Built ${{ github.event.pull_request.base.ref }} with no versions
+          echo [`date`] Built ${{ env.BASE_BRANCH }} with no versions
 
       - uses: actions/checkout@v6
         with:
@@ -192,7 +198,8 @@ jobs:
           cd pr/
           Tools/scripts/build_tests/pretty_diff_size.py -m $GITHUB_WORKSPACE/base_branch_bin_no_versions -s $GITHUB_WORKSPACE/pr_bin_no_versions
 
-      - name: Feature compare with  ${{ github.event.pull_request.base.ref }}
+      #- name: Feature compare with  ${{ github.event.pull_request.base.ref }}
+      - name: Feature compare with  ${{ env.BASE_BRANCH }}
         shell: bash
         run: |
           set -ex
@@ -218,7 +225,8 @@ jobs:
             echo "No differences found." >> $GITHUB_STEP_SUMMARY
           fi
 
-      - name: Binary compare with ${{ github.event.pull_request.base.ref }}
+      #- name: Binary compare with ${{ github.event.pull_request.base.ref }}
+      - name: Binary compare with ${{ env.BASE_BRANCH }}
         shell: bash
         run: |
           diff -r $GITHUB_WORKSPACE/base_branch_bin_no_versions $GITHUB_WORKSPACE/pr_bin_no_versions --exclude=*.abin --exclude=*.apj || true
