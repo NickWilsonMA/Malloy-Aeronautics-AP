@@ -231,3 +231,11 @@ jobs:
           else
             echo "No differences found." >> $GITHUB_STEP_SUMMARY
           fi
+
+      - name: Upload firmware
+	    uses: actions/upload-artifact@v4
+		with:
+		  name: firmware-${{ matrix.config }}
+		  path: |
+			${{ github.workspace }}/pr_bin
+
