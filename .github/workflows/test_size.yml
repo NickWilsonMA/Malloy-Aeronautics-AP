@@ -65,8 +65,8 @@ jobs:
       matrix:
         toolchain: [chibios]
         config: [MatekH743, mRoControlZeroOEMH7, CubeOrange]
-	env:
-		BASE_BRANCH: ${{ github.event.pull_request.base.ref || 'MA-4.3.0.X' }}
+    env:
+      BASE_BRANCH: ${{ github.event.pull_request.base.ref || 'MA-4.3.0.X' }}
     steps:
       - uses: actions/checkout@v6
         with:
