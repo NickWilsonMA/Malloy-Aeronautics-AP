@@ -267,11 +267,11 @@ jobs:
         run: |
           git config --global --add safe.directory ${GITHUB_WORKSPACE}
 
-		  python3 -m pip install --upgrade \
-    	    pymavlink==2.4.49 \
-    		MAVProxy==1.8.74
+          python3 -m pip install --upgrade \
+            pymavlink==2.4.49 \
+            MAVProxy==1.8.74
 
-		  python3 -m pip freeze | grep -E "MAVProxy|pymavlink"
+          python3 -m pip freeze | grep -E "MAVProxy|pymavlink"
 
           PATH="/github/home/.local/bin:$PATH"
           Tools/scripts/build_ci.sh
