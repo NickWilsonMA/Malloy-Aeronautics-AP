@@ -296,3 +296,11 @@ jobs:
           name: BIN-${{matrix.config}}
           path: /__w/ardupilot/ardupilot/logs
           retention-days: 7
+
+      - name: Archive SITL build
+        uses: actions/upload-artifact@v5
+        with:
+          name: SITL-${{ matrix.config }}
+          path: |
+            build/sitl
+          retention-days: 7
