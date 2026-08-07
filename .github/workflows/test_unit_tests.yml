@@ -172,9 +172,9 @@ jobs:
           retention-days: 14
 
       - name: Archive SITL build
+        if: always() && matrix.config == 'sitl'
         uses: actions/upload-artifact@v5
         with:
-          name: SITL-${{ matrix.config }}
-          path: |
-            build/sitl
+          name: SITL-${{ matrix.toolchain }}
+          path: build/sitl
           retention-days: 7
