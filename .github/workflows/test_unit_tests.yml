@@ -170,3 +170,11 @@ jobs:
           name: fail-${{ matrix.toolchain }}-${{matrix.config}}
           path: /tmp/buildlogs
           retention-days: 14
+
+      - name: Archive SITL build
+        uses: actions/upload-artifact@v5
+        with:
+          name: SITL-${{ matrix.config }}
+          path: |
+            build/sitl
+          retention-days: 7
