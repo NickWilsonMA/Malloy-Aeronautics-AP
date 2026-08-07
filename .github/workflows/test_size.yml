@@ -64,7 +64,7 @@ jobs:
       fail-fast: false # don't cancel if a job from the matrix fails
       matrix:
         toolchain: [chibios]
-        config: [MatekH743, mRoControlZeroOEMH7, CubeOrange]
+        config: [MatekH743, mRoControlZeroOEMH7, CubeOrange, sitl]
     env:
       BASE_BRANCH: ${{ github.event.pull_request.base.ref || 'MA-4.3.0.X' }}
     steps:
